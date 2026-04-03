@@ -28,6 +28,9 @@ exclude:
   - .sass-cache
   - vendor
   - .git
+  - CLAUDE.md
+  - GEMINI.md
+  - AGENTS.md
   - 01-solution/typescript/node_modules
   - 02-solution/typescript/node_modules
   - 03-solution/typescript/node_modules
