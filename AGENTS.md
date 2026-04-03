@@ -29,6 +29,7 @@
 02-solution/     → project files
 04-solution/     → project files
 01-solution/     → project files
+instructor/      → TypeScript modules
 LICENSE/         → project files
 esc/             → project files
 _layouts/        → project files
