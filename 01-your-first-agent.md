@@ -45,7 +45,7 @@ flowchart TD
     D -->|AgentCore pulls image| E["AgentCore Runtime\n(your agent is live)"]
 ```
 
-Why not just build the Docker image locally and push it? Two reasons. First, AgentCore runs ARM64 containers, and building ARM64 images on an x86 laptop is slow and finicky. CodeBuild runs on native ARM64 hardware, so the build is fast and reliable. Second, CodeBuild runs inside your AWS account with the right permissions — no need to configure Docker credentials locally.
+Why not just build the Docker image locally and push it? Two reasons. First, AgentCore runs ARM64 containers, and building ARM64 images on an x86 laptop is slow and finicky. CodeBuild runs on native ARM64 hardware, so the build is fast and reliable. Second, CodeBuild runs inside your AWS account with the right permissions - no need to configure Docker credentials locally.
 
 The Lambda function in the middle is a glue piece. Pulumi triggers it during deployment, and it starts the CodeBuild job and polls until the build finishes. This way Pulumi waits for the image to be ready before creating the AgentCore Runtime.
 
@@ -79,7 +79,7 @@ Add the ESC environment for AWS credentials. Open `Pulumi.dev.yaml` and set:
 
 ```yaml
 environment:
-  - pulumi-idp/auth
+  - aws-bedrock-workshop/dev
 ```
 
 The `pulumi new` template already includes the AWS provider. Pin it to the version this workshop uses:
@@ -291,7 +291,7 @@ Now the big part. We'll build the infrastructure file step by step. Each section
 ### Configuration and data sources
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/docs/concepts/config/">pulumi.Config</a></p>
 </details>
 
@@ -361,14 +361,14 @@ current_region = aws.get_region_output()
 
 </div>
 
-The config values let you customize the deployment without touching code. `getCallerIdentityOutput` and `getRegionOutput` fetch your AWS account ID and region at deploy time — we'll use these in IAM policy ARNs.
+The config values let you customize the deployment without touching code. `getCallerIdentityOutput` and `getRegionOutput` fetch your AWS account ID and region at deploy time - we'll use these in IAM policy ARNs.
 
 ### S3 bucket for agent source code
 
 The agent code gets zipped and uploaded to S3 so CodeBuild can read it.
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/s3/bucket/">aws.s3.Bucket</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/s3/bucketpublicaccessblock/">aws.s3.BucketPublicAccessBlock</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/s3/bucketversioning/">aws.s3.BucketVersioning</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/s3/bucketobjectv2/">aws.s3.BucketObjectv2</a></p>
 </details>
 
@@ -467,7 +467,7 @@ The `FileArchive` automatically zips the `agent-code/` directory. Versioning is 
 The ECR repository stores the Docker image that CodeBuild produces.
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/ecr/repository/">aws.ecr.Repository</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/ecr/repositorypolicy/">aws.ecr.RepositoryPolicy</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/ecr/lifecyclepolicy/">aws.ecr.LifecyclePolicy</a></p>
 </details>
 
@@ -601,7 +601,7 @@ The repository policy restricts image pulls to your AWS account. The lifecycle p
 This IAM role is the identity your running agent uses to call AWS services. The trust policy only allows AgentCore to assume it.
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/">aws.iam.Role</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicyattachment/">aws.iam.RolePolicyAttachment</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicy/">aws.iam.RolePolicy</a></p>
 </details>
 
@@ -918,7 +918,7 @@ This policy gives the agent seven categories of permissions: ECR image access (p
 CodeBuild needs its own IAM role with permissions to read from S3, push to ECR, and write build logs.
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/">aws.iam.Role</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicy/">aws.iam.RolePolicy</a></p>
 </details>
 
@@ -1092,7 +1092,7 @@ codebuild_role_policy = aws.iam.RolePolicy(
 The Lambda function that bridges Pulumi and CodeBuild. It starts a build and polls until completion, so Pulumi knows when the image is ready.
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/">aws.iam.Role</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicyattachment/">aws.iam.RolePolicyAttachment</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/lambda/function/">aws.lambda.Function</a></p>
 </details>
 
@@ -1252,7 +1252,7 @@ The timeout is set to 900 seconds (15 minutes) because CodeBuild can take a whil
 The CodeBuild project defines how the Docker image gets built. It reads source from S3, runs the buildspec on ARM64 hardware, and pushes the image to ECR.
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/codebuild/project/">aws.codebuild.Project</a></p>
 </details>
 
@@ -1390,7 +1390,7 @@ Key details: `ARM_CONTAINER` with the `aarch64` image ensures native ARM64 build
 This invocation calls the Lambda function during `pulumi up` to start CodeBuild and wait for the image to be ready.
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/lambda/invocation/">aws.lambda.Invocation</a></p>
 </details>
 
@@ -1483,7 +1483,7 @@ The `triggers` map controls when the build re-runs. If the source code version, 
 Finally, the actual agent resource. This is what makes your agent callable through AgentCore.
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/bedrock/agentcoreagentruntime/">aws.bedrock.AgentcoreAgentRuntime</a></p>
 </details>
 
@@ -1569,7 +1569,7 @@ basic_agent = aws.bedrock.AgentcoreAgentRuntime(
 
 </div>
 
-The `dependsOn` is critical. It makes sure the Docker image is built and pushed to ECR before Pulumi tries to create the runtime. The `SOURCE_VERSION` environment variable forces AgentCore to redeploy when the source code changes — without it, AgentCore would keep running the old container even after CodeBuild pushes a new image to the same `:latest` tag.
+The `dependsOn` is critical. It makes sure the Docker image is built and pushed to ECR before Pulumi tries to create the runtime. The `SOURCE_VERSION` environment variable forces AgentCore to redeploy when the source code changes - without it, AgentCore would keep running the old container even after CodeBuild pushes a new image to the same `:latest` tag.
 
 ### Outputs
 
@@ -1682,7 +1682,7 @@ You should see a response from your agent.
 
 Your agent is running. Here are some things worth experimenting with before you move on.
 
-**Change the system prompt.** Open `agent-code/basic_agent.py` and rewrite the `system_prompt` string. Make it a pirate, a haiku poet, or a sarcastic code reviewer. Then redeploy with `pulumi up` — CodeBuild will rebuild the image and AgentCore will pick it up. Try a few prompts against the new personality.
+**Change the system prompt.** Open `agent-code/basic_agent.py` and rewrite the `system_prompt` string. Make it a pirate, a haiku poet, or a sarcastic code reviewer. Then redeploy with `pulumi up` - CodeBuild will rebuild the image and AgentCore will pick it up. Try a few prompts against the new personality.
 
 **Send your own prompts.** You don't need the test script. Here's a one-liner you can modify:
 
@@ -1726,4 +1726,4 @@ You can also leave them running. Module 2 is a separate stack.
 - Strands' `BedrockAgentCoreApp` wraps your Python agent as an HTTP-callable service
 - `pulumi up` orchestrates the entire pipeline in the right order using `dependsOn`
 
-Next up: [Module 2 — Hosting an MCP server behind an AgentCore Gateway](02-mcp-server-jwt-auth.md)
+Next up: [Module 2 - Hosting an MCP server behind an AgentCore Gateway](02-mcp-server-jwt-auth.md)

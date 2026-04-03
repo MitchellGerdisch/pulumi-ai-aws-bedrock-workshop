@@ -1,6 +1,6 @@
 ---
 ---
-# Module 4: The full stack — weather agent with tools and memory
+# Module 4: The full stack - weather agent with tools and memory
 
 **Duration:** ~40 minutes
 
@@ -16,7 +16,7 @@
 
 ### AgentCore managed tools
 
-[Amazon Bedrock AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/what-is-bedrock-agentcore.html) provides three managed tools as first-class AWS resources that your agent connects to at runtime. These are not libraries bundled into your container — Pulumi creates them as standalone resources, and your agent finds them using IDs passed in as environment variables.
+[Amazon Bedrock AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/what-is-bedrock-agentcore.html) provides three managed tools as first-class AWS resources that your agent connects to at runtime. These are not libraries bundled into your container - Pulumi creates them as standalone resources, and your agent finds them using IDs passed in as environment variables.
 
 **[Browser](https://www.pulumi.com/registry/packages/aws/api-docs/bedrock/agentcorebrowser/)** is a headless Chrome instance running inside AWS. Your agent connects to it via WebSocket using the `BrowserClient` from the AgentCore SDK, then drives it with the `browser-use` library. Because it runs in AWS (not on your laptop), it has consistent network access to public URLs and you don't need to package a browser binary into your container.
 
@@ -85,7 +85,7 @@ Add the ESC environment to `Pulumi.dev.yaml`:
 
 ```yaml
 environment:
-  - pulumi-idp/auth
+  - aws-bedrock-workshop/dev
 ```
 
 The `pulumi new` template already includes the AWS provider. Pin it to the version this workshop uses:
@@ -124,7 +124,7 @@ Create the agent source directory:
 mkdir -p agent-code
 ```
 
-Create `agent-code/weather_agent.py`. This is the full agent — every section is explained below.
+Create `agent-code/weather_agent.py`. This is the full agent - every section is explained below.
 
 ### Imports and environment variables
 
@@ -416,7 +416,7 @@ def get_activity_preferences() -> Dict[str, Any]:
 
 ### Agent creation and system prompt
 
-The system prompt instructs the agent to follow the 7-step workflow in order. The `IMPORTANT` line at the end prevents the agent from asking follow-up questions — essential for a background async task where there is no human waiting to respond.
+The system prompt instructs the agent to follow the 7-step workflow in order. The `IMPORTANT` line at the end prevents the agent from asking follow-up questions - essential for a background async task where there is no human waiting to respond.
 
 ```python
 def create_weather_agent() -> Agent:
@@ -609,7 +609,7 @@ def handler(event, _context):
     }
 ```
 
-Pulumi invokes this Lambda once after the Memory resource is created. The `actorId` and `sessionId` values here must match those used in the agent's `get_activity_preferences` tool — that's how the agent finds the correct event when it calls `MemoryClient.list_events`.
+Pulumi invokes this Lambda once after the Memory resource is created. The `actorId` and `sessionId` values here must match those used in the agent's `get_activity_preferences` tool - that's how the agent finds the correct event when it calls `MemoryClient.list_events`.
 
 ## Step 5: Create the build trigger Lambda
 
@@ -703,7 +703,7 @@ Now for the infrastructure. We'll walk through it section by section. Each snipp
 ### Configuration and data sources
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/docs/concepts/config/">pulumi.Config</a></p>
 </details>
 
@@ -776,11 +776,11 @@ current_region = aws.get_region_output()
 ### Browser Tool
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/bedrock/agentcorebrowser/">aws.bedrock.AgentcoreBrowser</a></p>
 </details>
 
-The Browser resource is a standalone AWS resource. `networkMode: "PUBLIC"` means the browser can reach public internet URLs — needed to scrape weather.gov. The resource ID (`browser.browserId` / `browser.browser_id`) is passed to the agent as an environment variable at runtime.
+The Browser resource is a standalone AWS resource. `networkMode: "PUBLIC"` means the browser can reach public internet URLs - needed to scrape weather.gov. The resource ID (`browser.browserId` / `browser.browser_id`) is passed to the agent as an environment variable at runtime.
 
 <div class="lang-tabs" markdown="1">
 
@@ -824,7 +824,7 @@ browser = aws.bedrock.AgentcoreBrowser(
 ### Code Interpreter Tool
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/bedrock/agentcoreinterpreter/">aws.bedrock.AgentcoreCodeInterpreter</a></p>
 </details>
 
@@ -875,7 +875,7 @@ code_interpreter = aws.bedrock.AgentcoreCodeInterpreter(
 ### Memory
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/bedrock/agentcorememory/">aws.bedrock.AgentcoreMemory</a></p>
 </details>
 
@@ -921,7 +921,7 @@ memory = aws.bedrock.AgentcoreMemory(
 ### S3 Buckets
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/s3/bucket/">aws.s3.Bucket</a></p>
 </details>
 
@@ -1081,7 +1081,7 @@ agent_source_object = aws.s3.BucketObjectv2(
 ### ECR Repository
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/ecr/repository/">aws.ecr.Repository</a></p>
 </details>
 
@@ -1213,7 +1213,7 @@ aws.ecr.LifecyclePolicy(
 ### Agent Execution Role
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/">aws.iam.Role</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicyattachment/">aws.iam.RolePolicyAttachment</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicy/">aws.iam.RolePolicy</a></p>
 </details>
 
@@ -1535,7 +1535,7 @@ agent_execution_role_policy = aws.iam.RolePolicy(
 ### CodeBuild Role and policy
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/">aws.iam.Role</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicy/">aws.iam.RolePolicy</a></p>
 </details>
 
@@ -1711,7 +1711,7 @@ codebuild_role_policy = aws.iam.RolePolicy(
 ### Build Trigger Lambda
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/">aws.iam.Role</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicyattachment/">aws.iam.RolePolicyAttachment</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/lambda/function/">aws.lambda.Function</a></p>
 </details>
 
@@ -1868,7 +1868,7 @@ build_trigger_function = aws.lambda_.Function(
 ### CodeBuild Project
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/codebuild/project/">aws.codebuild.Project</a></p>
 </details>
 
@@ -2004,7 +2004,7 @@ agent_image = aws.codebuild.Project(
 ### Trigger Build
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/lambda/invocation/">aws.lambda.Invocation</a></p>
 </details>
 
@@ -2095,7 +2095,7 @@ trigger_build = aws.lambda_.Invocation(
 ### Memory Initialization Lambda
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/">aws.iam.Role</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicyattachment/">aws.iam.RolePolicyAttachment</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/lambda/function/">aws.lambda.Function</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/lambda/invocation/">aws.lambda.Invocation</a></p>
 </details>
 
@@ -2299,7 +2299,7 @@ aws.lambda_.Invocation(
 ### Weather Agent Runtime
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/bedrock/agentcoreagentruntime/">aws.bedrock.AgentcoreAgentRuntime</a></p>
 </details>
 
@@ -2398,10 +2398,10 @@ weather_agent = aws.bedrock.AgentcoreAgentRuntime(
 
 </div>
 
-### Observability — CloudWatch logs and X-Ray traces
+### Observability - CloudWatch logs and X-Ray traces
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/cloudwatch/loggroup/">aws.cloudwatch.LogGroup</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/cloudwatch/logdeliverysource/">aws.cloudwatch.LogDeliverySource</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/cloudwatch/logdeliverydestination/">aws.cloudwatch.LogDeliveryDestination</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/cloudwatch/logdelivery/">aws.cloudwatch.LogDelivery</a></p>
 </details>
 
@@ -2683,9 +2683,9 @@ python test_weather_agent.py $AGENT_ARN
 
 The test script runs through the full pipeline:
 
-1. **Runtime status** — is the AgentCore runtime READY?
-2. **Agent invocation** — does the agent accept a request? (first call may take 1-2 min for cold start)
-3. **S3 results** — waits for the Markdown report to appear in S3 (3-5 min)
+1. **Runtime status** - is the AgentCore runtime READY?
+2. **Agent invocation** - does the agent accept a request? (first call may take 1-2 min for cold start)
+3. **S3 results** - waits for the Markdown report to appear in S3 (3-5 min)
 
 When everything works, you'll see:
 
@@ -2740,7 +2740,7 @@ print(json.loads(r['response'].read().decode()))
 
 Wait a few minutes and check S3 again. The new report should appear in the results bucket.
 
-**Change the activity preferences.** The preferences live in Memory, seeded by the init Lambda. Open `lambda/init-memory/index.py` and change the activity lists — add "surfing" to good weather, or "escape rooms" to poor weather. Redeploy with `pulumi up` to re-seed Memory, then invoke the agent again. The recommendations should reflect your new preferences.
+**Change the activity preferences.** The preferences live in Memory, seeded by the init Lambda. Open `lambda/init-memory/index.py` and change the activity lists - add "surfing" to good weather, or "escape rooms" to poor weather. Redeploy with `pulumi up` to re-seed Memory, then invoke the agent again. The recommendations should reflect your new preferences.
 
 **Tweak the classification thresholds.** Open `agent-code/weather_agent.py` and find the `generate_analysis_code` tool. Edit the classification rules in the prompt (e.g., change the GOOD range from 65-80 to 55-90). Redeploy and see how the day classifications change.
 
@@ -2759,4 +2759,4 @@ aws s3 cp s3://$(pulumi stack output resultsBucketName)/results.md - | less
 - The Memory API stores events tagged with actor IDs and session IDs, with configurable TTL
 - A Lambda invocation can seed Memory with initial data during deployment, so the agent has preferences from the very first invocation
 
-Next up: [Module 5 — Housekeeping](05-housekeeping.md)
+Next up: [Module 5 - Housekeeping](05-housekeeping.md)

@@ -78,7 +78,7 @@ We recommend **GitHub Codespaces** for a zero-install experience. Click the badg
 
 **`pulumi up` hangs during CodeBuild**: The first build takes 5-10 minutes while Docker images are built and pushed to ECR. This is normal.
 
-**AWS credentials expired**: Run `pulumi env open pulumi-idp/auth` to refresh your OIDC token, then retry.
+**AWS credentials expired**: Run `pulumi env open aws-bedrock-workshop/dev` to verify your credentials are configured correctly, then retry.
 
 **Agent invocation returns 500**: Check CloudWatch Logs at `/aws/bedrock-agentcore/runtimes/` for your runtime. Common causes are missing IAM permissions or environment variables.
 

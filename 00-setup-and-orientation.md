@@ -8,7 +8,7 @@
 
 - What Amazon Bedrock AgentCore, Strands SDK, and Pulumi ESC are
 - How they connect to each other
-- How to configure AWS credentials through OIDC so you never touch a static access key
+- How to store AWS credentials securely in a Pulumi ESC environment
 
 ## The big picture
 
@@ -20,7 +20,7 @@ Before we write any code, here's how the pieces fit together.
 
 **Pulumi** is the infrastructure-as-code tool we use to define and deploy everything: S3 buckets, ECR repositories, IAM roles, CodeBuild projects, and the AgentCore runtimes themselves. You can choose either TypeScript or Python for the infrastructure code.
 
-**Pulumi ESC** (Environments, Secrets, and Configuration) is Pulumi's secrets management layer. Instead of storing AWS access keys in your shell or a `.env` file, ESC uses OIDC federation to get short-lived credentials from AWS on demand. The credentials rotate automatically and never hit disk.
+**Pulumi ESC** (Environments, Secrets, and Configuration) is Pulumi's centralized secrets and configuration store. Instead of exporting AWS access keys in your shell or scattering them across `.env` files, ESC stores them encrypted and injects them automatically when you run `pulumi up`. Secrets are encrypted at rest and never appear in plain text in your Pulumi state.
 
 Here's the flow:
 
@@ -29,7 +29,7 @@ You write agent code (Python/Strands)
     ↓
 Pulumi deploys infrastructure (TypeScript or Python)
     ↓
-ESC provides AWS credentials (OIDC)
+ESC provides AWS credentials (encrypted secrets)
     ↓
 CodeBuild packages your agent into a Docker image
     ↓
@@ -54,21 +54,76 @@ pulumi whoami
 
 You should see your username.
 
-## Step 2: Set up the ESC environment for AWS OIDC
+## Tips for success
 
-Pulumi ESC replaces static AWS credentials with short-lived OIDC tokens. Here's how that works: Pulumi Cloud acts as an identity provider that AWS trusts. When you run `pulumi up`, ESC requests temporary credentials from AWS using your Pulumi identity. The credentials last one hour and are never stored anywhere.
+1. **Follow the modules sequentially** - each one builds on concepts from the previous module
+2. **Complete the verification steps** at the end of each section to catch issues early
+3. **Ask your instructors for help** - we're here to keep you moving
+4. **Experiment** - once a module works, try modifying the agent prompt or tools to see what happens
 
-Your instructor has already set up the OIDC trust relationship in the workshop AWS account. You just need to create a local reference to the ESC environment.
+## Getting started
 
-Check that the environment exists:
+### Option 1: GitHub Codespaces (recommended)
+
+Click the badge below to launch a pre-configured development environment:
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/dirien/pulumi-ai-aws-bedrock-workshop?quickstart=1)
+
+Wait for the devcontainer to build (takes a couple of minutes). All tools (Pulumi CLI, Node.js, Python, uv) are pre-installed.
+
+### Option 2: Local development
+
+1. Clone the repository:
+
+   ```bash
+   git clone https://github.com/dirien/pulumi-ai-aws-bedrock-workshop.git
+   cd pulumi-ai-aws-bedrock-workshop
+   ```
+
+2. Install the [Pulumi CLI](https://www.pulumi.com/docs/install/)
+3. Install Node.js 18+ and Python 3.11+
+4. Install [uv](https://docs.astral.sh/uv/) for Python dependency management
+5. Install test dependencies: `pip install boto3 mcp`
+6. Run `pulumi login` to authenticate with Pulumi Cloud
+
+## Step 2: Create your ESC environment for AWS credentials
+
+Your instructor has set up a credential sharing page with the AWS credentials for this workshop. You will get the URL from your instructor.
+
+Open the credential page in your browser and copy the **AWS Access Key ID** and **AWS Secret Access Key** values.
+
+Now create a Pulumi ESC environment to store these credentials securely:
+
+1. Navigate to [Pulumi Cloud](https://app.pulumi.com) > **Environments** in the left sidebar
+2. Click **Create environment**
+3. Set the project name to `aws-bedrock-workshop` and the environment name to `dev`
+4. Paste the following YAML configuration, replacing the placeholder values with the credentials you copied:
+
+   ```yaml
+   values:
+     aws-creds:
+       accessKeyId:
+         fn::secret: <YOUR_AWS_ACCESS_KEY_ID>
+       secretAccessKey:
+         fn::secret: <YOUR_AWS_SECRET_ACCESS_KEY>
+     environmentVariables:
+       AWS_ACCESS_KEY_ID: ${aws-creds.accessKeyId}
+       AWS_SECRET_ACCESS_KEY: ${aws-creds.secretAccessKey}
+     pulumiConfig:
+       aws:region: us-east-1
+   ```
+
+5. Click **Save**
+
+The `fn::secret` function encrypts each credential at rest in Pulumi Cloud. When you run `pulumi up`, ESC decrypts them and injects them as environment variables automatically.
+
+Verify the environment works:
 
 ```bash
-pulumi env open pulumi-idp/auth
+pulumi env open aws-bedrock-workshop/dev
 ```
 
-You should see temporary AWS credentials printed to the terminal. These will be injected automatically into every `pulumi up` command.
-
-If you see an error, ask your instructor. The ESC environment may need to be shared with your Pulumi organization.
+You should see the AWS credentials (with secret values masked) and the `aws:region` config. If you see an error, double-check that the project name is `aws-bedrock-workshop` and the environment name is `dev`.
 
 ## Step 3: Verify your setup
 
@@ -100,7 +155,7 @@ Open `Pulumi.dev.yaml` and add the ESC environment reference:
 
 ```yaml
 environment:
-  - pulumi-idp/auth
+  - aws-bedrock-workshop/dev
 ```
 
 Run a preview:
@@ -109,7 +164,7 @@ Run a preview:
 pulumi preview
 ```
 
-If this succeeds, your AWS credentials are working through OIDC and you're ready for Module 1. Destroy the test project:
+If this succeeds, your AWS credentials are working through ESC and you're ready for Module 1. Destroy the test project:
 
 ```bash
 pulumi destroy --yes
@@ -121,7 +176,7 @@ rm -rf /tmp/verify-setup
 
 Every module creates AWS resources (IAM roles, ECR repos, AgentCore runtimes) that need unique names within the AWS account. If multiple participants share the same account and use the same default names, you'll get conflicts.
 
-Pick a short identifier now — your initials, a nickname, anything 2-5 characters. You'll use it in every module as your `stackName` prefix.
+Pick a short identifier now - your initials, a nickname, anything 2-5 characters. You'll use it in every module as your `stackName` prefix.
 
 For example, if your identifier is `ed`:
 
@@ -150,7 +205,7 @@ The modules build on each other. By Module 4, you'll have deployed a multi-tool 
 
 - AgentCore is a managed container runtime for AI agents
 - Strands SDK is the Python framework for writing agent logic
-- Pulumi ESC provides AWS credentials through OIDC federation — no static keys
+- Pulumi ESC stores AWS credentials encrypted and injects them into every deployment automatically
 - Your local setup can authenticate with AWS and run `pulumi preview`
 
-Next up: [Module 1 — Your first agent on AgentCore](01-your-first-agent.md)
+Next up: [Module 1 - Your first agent on AgentCore](01-your-first-agent.md)

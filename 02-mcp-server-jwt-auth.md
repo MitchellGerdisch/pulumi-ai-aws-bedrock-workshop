@@ -26,11 +26,11 @@ The transport we use here is Stateless Streamable HTTP. Each request is independ
 
 ### AgentCore Gateway
 
-The [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) is the front door for clients calling your MCP tools. It handles JWT token validation, routes requests to the correct backend, and enforces Cedar access policies — all before your server code sees a single request. Your MCP server never deals with auth; the Gateway handles it.
+The [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) is the front door for clients calling your MCP tools. It handles JWT token validation, routes requests to the correct backend, and enforces Cedar access policies - all before your server code sees a single request. Your MCP server never deals with auth; the Gateway handles it.
 
-A [Gateway Target](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-add-target-api-target-config.html) connects the Gateway to a backend — in our case, an AgentCore-hosted MCP server runtime. The Gateway uses its IAM role to call the runtime via SigV4-signed requests.
+A [Gateway Target](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-add-target-api-target-config.html) connects the Gateway to a backend - in our case, an AgentCore-hosted MCP server runtime. The Gateway uses its IAM role to call the runtime via SigV4-signed requests.
 
-The [AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html) is the containerized service that runs your MCP server. Like Module 1, you point it at a Docker image in ECR and AgentCore manages the rest. The runtime itself has no auth — that's the Gateway's job.
+The [AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html) is the containerized service that runs your MCP server. Like Module 1, you point it at a Docker image in ECR and AgentCore manages the rest. The runtime itself has no auth - that's the Gateway's job.
 
 ### JWT authentication with Cognito
 
@@ -102,7 +102,7 @@ Add the ESC environment to `Pulumi.dev.yaml`:
 
 ```yaml
 environment:
-  - pulumi-idp/auth
+  - aws-bedrock-workshop/dev
 ```
 
 The `pulumi new` template already includes the AWS provider. Pin it to the version this workshop uses:
@@ -131,7 +131,7 @@ Set your unique stack name and store the test password in the shared ESC environ
 
 ```bash
 pulumi config set stackName agentcore-mcp-<id>
-pulumi env set pulumi-idp/auth 'pulumiConfig.mcp-server-agentcore-runtime:testPassword' 'TestPassword123' --secret
+pulumi env set aws-bedrock-workshop/dev 'pulumiConfig.mcp-server-agentcore-runtime:testPassword' 'TestPassword123' --secret
 ```
 
 ## Step 2: Write the MCP server
@@ -337,7 +337,7 @@ Now the infrastructure file. We'll build it step by step. Each section adds reso
 ### Configuration and data sources
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/docs/concepts/config/">pulumi.Config</a></p>
 </details>
 
@@ -416,7 +416,7 @@ current_region = aws.get_region_output()
 The server code gets zipped and uploaded to S3 so CodeBuild can read it.
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/s3/bucket/">aws.s3.Bucket</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/s3/bucketpublicaccessblock/">aws.s3.BucketPublicAccessBlock</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/s3/bucketversioning/">aws.s3.BucketVersioning</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/s3/bucketobjectv2/">aws.s3.BucketObjectv2</a></p>
 </details>
 
@@ -513,7 +513,7 @@ The `FileArchive` automatically zips the `mcp-server-code/` directory. Versionin
 The User Pool is the identity store. It issues JWT tokens that AgentCore validates.
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/cognito/userpool/">aws.cognito.UserPool</a></p>
 </details>
 
@@ -582,14 +582,14 @@ mcp_user_pool = aws.cognito.UserPool(
 
 </div>
 
-The relaxed password policy is for the workshop only — in production you'd want stricter requirements. The `email` schema attribute is optional but useful for identifying users.
+The relaxed password policy is for the workshop only - in production you'd want stricter requirements. The `email` schema attribute is optional but useful for identifying users.
 
 ### Cognito User Pool Client
 
 The app client is what the MCP client presents when requesting tokens. AgentCore's authorizer restricts access to tokens issued for this specific client ID.
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/cognito/userpoolclient/">aws.cognito.UserPoolClient</a></p>
 </details>
 
@@ -630,10 +630,10 @@ mcp_client = aws.cognito.UserPoolClient(
 
 ### Test user
 
-This creates a test user in the pool. The user is created in `FORCE_CHANGE_PASSWORD` state — the Lambda in the next step sets a permanent password.
+This creates a test user in the pool. The user is created in `FORCE_CHANGE_PASSWORD` state - the Lambda in the next step sets a permanent password.
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/cognito/user/">aws.cognito.User</a></p>
 </details>
 
@@ -666,14 +666,14 @@ test_user = aws.cognito.User(
 
 </div>
 
-`messageAction: "SUPPRESS"` prevents Cognito from sending a welcome email — useful for programmatically created test users.
+`messageAction: "SUPPRESS"` prevents Cognito from sending a welcome email - useful for programmatically created test users.
 
 ### Cognito password setter Lambda
 
 This follows the same pattern as the build trigger Lambda from Module 1, adapted for the Cognito use case. A Lambda function with its own IAM role calls `AdminSetUserPassword` to set the user's permanent password from the Pulumi secret.
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/">aws.iam.Role</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicyattachment/">aws.iam.RolePolicyAttachment</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/lambda/function/">aws.lambda.Function</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/lambda/invocation/">aws.lambda.Invocation</a></p>
 </details>
 
@@ -872,7 +872,7 @@ The `dependsOn` list ensures the user exists and the Lambda function is deployed
 The ECR repository stores the Docker image that CodeBuild produces.
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/ecr/repository/">aws.ecr.Repository</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/ecr/repositorypolicy/">aws.ecr.RepositoryPolicy</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/ecr/lifecyclepolicy/">aws.ecr.LifecyclePolicy</a></p>
 </details>
 
@@ -1008,7 +1008,7 @@ This IAM role is the identity your running MCP server uses. The trust policy onl
 This follows the same pattern as Module 1, adapted for the MCP server (the inline policy references `serverEcr` instead of `agentEcr`).
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/">aws.iam.Role</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicyattachment/">aws.iam.RolePolicyAttachment</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicy/">aws.iam.RolePolicy</a></p>
 </details>
 
@@ -1300,7 +1300,7 @@ agent_execution_role_policy = aws.iam.RolePolicy(
 
 </div>
 
-The `ECRImageAccess` statement references `serverEcr.arn` / `server_ecr.arn` — specific to this module's ECR repository. Everything else is identical to Module 1.
+The `ECRImageAccess` statement references `serverEcr.arn` / `server_ecr.arn` - specific to this module's ECR repository. Everything else is identical to Module 1.
 
 ### CodeBuild service role
 
@@ -1309,7 +1309,7 @@ CodeBuild needs its own IAM role with permissions to read from S3, push to ECR, 
 This follows the same pattern as Module 1, adapted for the MCP server (ECR references use `serverEcr` / `server_ecr`).
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/">aws.iam.Role</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicy/">aws.iam.RolePolicy</a></p>
 </details>
 
@@ -1487,7 +1487,7 @@ The Lambda function that bridges Pulumi and CodeBuild. It starts a build and pol
 This follows the same pattern as Module 1, adapted for the MCP server. The project name is `${stackName}-mcp-server-build`.
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/">aws.iam.Role</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicyattachment/">aws.iam.RolePolicyAttachment</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/lambda/function/">aws.lambda.Function</a></p>
 </details>
 
@@ -1646,7 +1646,7 @@ The timeout is set to 900 seconds (15 minutes) because CodeBuild can take a whil
 The CodeBuild project defines how the Docker image gets built. It reads source from S3, runs the buildspec on ARM64 hardware, and pushes the image to ECR.
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/codebuild/project/">aws.codebuild.Project</a></p>
 </details>
 
@@ -1784,7 +1784,7 @@ agent_image = aws.codebuild.Project(
 This invocation calls the Lambda function during `pulumi up` to start CodeBuild and wait for the MCP server image to be ready.
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/lambda/invocation/">aws.lambda.Invocation</a></p>
 </details>
 
@@ -1874,10 +1874,10 @@ The `triggers` map controls when the build re-runs. If the source code version, 
 
 ### MCP server runtime
 
-The runtime is similar to Module 1, with one addition: `protocolConfiguration` declares this is an MCP server. Note that there is **no** `authorizerConfiguration` here — JWT auth is handled by the Gateway (next section), not the runtime.
+The runtime is similar to Module 1, with one addition: `protocolConfiguration` declares this is an MCP server. Note that there is **no** `authorizerConfiguration` here - JWT auth is handled by the Gateway (next section), not the runtime.
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/bedrock/agentcoreagentruntime/">aws.bedrock.AgentcoreAgentRuntime</a></p>
 </details>
 
@@ -1979,10 +1979,10 @@ mcp_server = aws.bedrock.AgentcoreAgentRuntime(
 
 ### AgentCore Gateway
 
-The [Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) is the front door for clients. It validates JWT tokens from Cognito before forwarding requests to the MCP server. This separation means your MCP server code never has to deal with auth — the Gateway handles it. It also enables Cedar policy enforcement (covered later).
+The [Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) is the front door for clients. It validates JWT tokens from Cognito before forwarding requests to the MCP server. This separation means your MCP server code never has to deal with auth - the Gateway handles it. It also enables Cedar policy enforcement (covered later).
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/bedrock/agentcoregateway/">aws.bedrock.AgentcoreGateway</a></p>
 </details>
 
@@ -2132,7 +2132,7 @@ pulumi.export("gatewayUrl", mcp_gateway.gateway_url)
 
 </div>
 
-`testPassword` is a secret output — Pulumi will mask it in terminal output. Use `pulumi stack output testPassword --show-secrets` to reveal it. The `getTokenCommand` output gives you a ready-to-run command for getting a JWT token.
+`testPassword` is a secret output - Pulumi will mask it in terminal output. Use `pulumi stack output testPassword --show-secrets` to reveal it. The `getTokenCommand` output gives you a ready-to-run command for getting a JWT token.
 
 ## Step 7: Deploy
 
@@ -2147,7 +2147,7 @@ Same 5-10 minute wait for CodeBuild. At the end, Pulumi outputs the runtime ARN,
 The Gateway is deployed, but it doesn't know about the MCP server yet. You need to create a **Gateway Target** that points the Gateway to the runtime's invocation endpoint. This step uses the AWS SDK because the Pulumi providers don't yet support the `iamCredentialProvider` field required for AgentCore runtime targets.
 
 ```bash
-pulumi env run pulumi-idp/auth -- python3 -c "
+pulumi env run aws-bedrock-workshop/dev -- python3 -c "
 import boto3, json, urllib.parse
 client = boto3.client('bedrock-agentcore-control', region_name='$(pulumi stack output cognitoDiscoveryUrl | grep -oP \"(?<=cognito-idp\.)[^.]+\")')
 agent_arn = '$(pulumi stack output agentRuntimeArn)'
@@ -2247,7 +2247,7 @@ Note that the Gateway prefixes tool names with the target name and `___` (three 
 Policy Engine and Policy resources are not yet available as Pulumi resources, so we use the AWS CLI via `pulumi env run`:
 
 ```bash
-pulumi env run pulumi-idp/auth -- aws bedrock-agentcore-control create-policy-engine \
+pulumi env run aws-bedrock-workshop/dev -- aws bedrock-agentcore-control create-policy-engine \
   --name workshop_policy_engine \
   --description "Policy engine for MCP workshop" \
   --region us-east-1
@@ -2279,7 +2279,7 @@ EOF
 Then create the policy:
 
 ```bash
-pulumi env run pulumi-idp/auth -- aws bedrock-agentcore-control create-policy \
+pulumi env run aws-bedrock-workshop/dev -- aws bedrock-agentcore-control create-policy \
   --policy-engine-id $POLICY_ENGINE_ID \
   --name allow_add_and_greet \
   --description "Allow add_numbers and greet_user only - deny multiply_numbers" \
@@ -2297,7 +2297,7 @@ Attach the policy engine to your Gateway in `ENFORCE` mode:
 export GATEWAY_ID=$(pulumi stack output gatewayId)
 export POLICY_ENGINE_ARN=<paste policyEngineArn from step 10>
 
-pulumi env run pulumi-idp/auth -- python3 -c "
+pulumi env run aws-bedrock-workshop/dev -- python3 -c "
 import boto3
 client = boto3.client('bedrock-agentcore-control', region_name='us-east-1')
 client.update_gateway(
@@ -2340,7 +2340,7 @@ Tool Execution Denied: Tool call not allowed due to policy enforcement
 [No policy applies to the request (denied by default).]
 ```
 
-That's Cedar in action — default-deny blocks any tool not explicitly permitted.
+That's Cedar in action - default-deny blocks any tool not explicitly permitted.
 
 ### Clean up Cedar resources
 
@@ -2349,12 +2349,12 @@ When you're done experimenting, remove the policy engine from the Gateway and de
 ```bash
 # Detach policy engine (re-run the update_gateway without policyEngineConfiguration)
 # Delete policy, then policy engine
-pulumi env run pulumi-idp/auth -- aws bedrock-agentcore-control delete-policy \
+pulumi env run aws-bedrock-workshop/dev -- aws bedrock-agentcore-control delete-policy \
   --policy-engine-id $POLICY_ENGINE_ID \
   --policy-id <YOUR_POLICY_ID> \
   --region us-east-1
 
-pulumi env run pulumi-idp/auth -- aws bedrock-agentcore-control delete-policy-engine \
+pulumi env run aws-bedrock-workshop/dev -- aws bedrock-agentcore-control delete-policy-engine \
   --policy-engine-id $POLICY_ENGINE_ID \
   --region us-east-1
 ```
@@ -2366,8 +2366,8 @@ pulumi env run pulumi-idp/auth -- aws bedrock-agentcore-control delete-policy-en
 - [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) sits in front of the runtime, handling JWT validation and policy enforcement
 - The Gateway connects to the runtime via a Gateway Target with `GATEWAY_IAM_ROLE` credential provider (SigV4 auth)
 - Cognito provides JWT tokens; the Gateway validates them before any request reaches your MCP server code
-- Pulumi secrets encrypt sensitive config values like passwords — they're masked in output and encrypted in state
+- Pulumi secrets encrypt sensitive config values like passwords - they're masked in output and encrypted in state
 - [Cedar](https://www.cedarpolicy.com/) policies use a default-deny model: everything is blocked unless explicitly permitted
 - The Policy Engine workflow is: create engine, add policies, attach to Gateway in ENFORCE mode
 
-Next up: [Module 3 — Multi-agent orchestration](03-multi-agent-orchestration.md)
+Next up: [Module 3 - Multi-agent orchestration](03-multi-agent-orchestration.md)

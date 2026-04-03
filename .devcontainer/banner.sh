@@ -64,7 +64,7 @@ printf "    ${DIM}•${RESET} opencode auth list                        ${DIM}(c
 echo ""
 printf "  ${BOLD}${CYAN}Workshop${RESET}\n"
 printf "    ${DIM}•${RESET} pulumi login                              ${DIM}(authenticate with Pulumi Cloud)${RESET}\n"
-printf "    ${DIM}•${RESET} pulumi env open pulumi-idp/auth           ${DIM}(verify AWS OIDC credentials)${RESET}\n"
+printf "    ${DIM}•${RESET} pulumi env open aws-bedrock-workshop/dev  ${DIM}(verify AWS credentials)${RESET}\n"
 printf "    ${DIM}•${RESET} Start with Module 0: 00-setup-and-orientation.md\n"
 
 echo ""

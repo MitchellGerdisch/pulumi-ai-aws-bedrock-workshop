@@ -18,7 +18,7 @@
 
 A single agent with a dozen tools and a long system prompt can work, but it gets unwieldy fast. The LLM has to decide between too many options on every turn, and the system prompt becomes a wall of instructions competing for attention.
 
-The [AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html) supports native Agent-to-Agent communication. One agent can invoke another agent runtime directly over the AWS API using `bedrock-agentcore:InvokeAgentRuntime`. AgentCore manages the routing and lifecycle — you just need the target agent's ARN and the right IAM permissions.
+The [AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html) supports native Agent-to-Agent communication. One agent can invoke another agent runtime directly over the AWS API using `bedrock-agentcore:InvokeAgentRuntime`. AgentCore manages the routing and lifecycle - you just need the target agent's ARN and the right IAM permissions.
 
 ### Orchestrator/specialist pattern
 
@@ -27,7 +27,7 @@ The alternative to one large agent is splitting work by specialty. An **orchestr
 In this module, you'll build two agents:
 
 - **Orchestrator**: Handles simple queries (greetings, basic questions) directly. Delegates complex analytical tasks to the specialist.
-- **Specialist**: An analytical agent that gives thorough, detailed answers. It doesn't know about the orchestrator — it just answers whatever it's asked.
+- **Specialist**: An analytical agent that gives thorough, detailed answers. It doesn't know about the orchestrator - it just answers whatever it's asked.
 
 ### IAM-based access control for agent invocation
 
@@ -103,7 +103,7 @@ Add the ESC environment to `Pulumi.dev.yaml`:
 
 ```yaml
 environment:
-  - pulumi-idp/auth
+  - aws-bedrock-workshop/dev
 ```
 
 The `pulumi new` template already includes the AWS provider. Pin it to the version this workshop uses:
@@ -361,7 +361,7 @@ if __name__ == "__main__":
     app.run()
 ```
 
-The orchestrator uses the same `requirements.txt` and `Dockerfile` as the specialist — copy them into `agent-orchestrator-code/`.
+The orchestrator uses the same `requirements.txt` and `Dockerfile` as the specialist - copy them into `agent-orchestrator-code/`.
 
 ## Step 4: Create the buildspecs
 
@@ -423,7 +423,7 @@ phases:
 
 ## Step 5: Create the build trigger Lambda
 
-Copy the build trigger Lambda from Module 1. The function is reused here without modification — create the directory and copy the code:
+Copy the build trigger Lambda from Module 1. The function is reused here without modification - create the directory and copy the code:
 
 ```bash
 mkdir -p lambda/build-trigger
@@ -439,7 +439,7 @@ The infrastructure doubles everything from Module 1: two S3 buckets, two ECR rep
 ### Configuration and data sources
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/docs/concepts/config/">pulumi.Config</a></p>
 </details>
 
@@ -505,7 +505,7 @@ current_region = aws.get_region_output()
 ### Dual S3 buckets
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/s3/bucket/">aws.s3.Bucket</a></p>
 </details>
 
@@ -693,7 +693,7 @@ specialist_source_object = aws.s3.BucketObjectv2(
 ### Dual ECR repositories
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/ecr/repository/">aws.ecr.Repository</a></p>
 </details>
 
@@ -932,7 +932,7 @@ aws.ecr.LifecyclePolicy(
 ### Orchestrator execution role
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/">aws.iam.Role</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicyattachment/">aws.iam.RolePolicyAttachment</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicy/">aws.iam.RolePolicy</a></p>
 </details>
 
@@ -1232,11 +1232,11 @@ orchestrator_execution_role_policy = aws.iam.RolePolicy(
 ### A2A policy (orchestrator invokes specialist)
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicy/">aws.iam.RolePolicy</a></p>
 </details>
 
-This is the policy that enables A2A communication. It grants `bedrock-agentcore:InvokeAgentRuntime` to the orchestrator's execution role, scoped to all runtimes in the account. The specialist's role does not get this permission — the flow is one-directional only.
+This is the policy that enables A2A communication. It grants `bedrock-agentcore:InvokeAgentRuntime` to the orchestrator's execution role, scoped to all runtimes in the account. The specialist's role does not get this permission - the flow is one-directional only.
 
 <div class="lang-tabs" markdown="1">
 
@@ -1304,11 +1304,11 @@ orchestrator_invoke_specialist = aws.iam.RolePolicy(
 ### Specialist execution role
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/">aws.iam.Role</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicyattachment/">aws.iam.RolePolicyAttachment</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicy/">aws.iam.RolePolicy</a></p>
 </details>
 
-The specialist execution role follows the same pattern as the orchestrator — same trust policy, same managed policy attachment, same inline permissions — but scoped to the specialist's ECR repository. Critically, it does not include the `InvokeAgentRuntime` permission.
+The specialist execution role follows the same pattern as the orchestrator - same trust policy, same managed policy attachment, same inline permissions - but scoped to the specialist's ECR repository. Critically, it does not include the `InvokeAgentRuntime` permission.
 
 <div class="lang-tabs" markdown="1">
 
@@ -1604,7 +1604,7 @@ specialist_execution_role_policy = aws.iam.RolePolicy(
 ### Shared CodeBuild role and policy
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/">aws.iam.Role</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicy/">aws.iam.RolePolicy</a></p>
 </details>
 
@@ -1789,7 +1789,7 @@ codebuild_role_policy = aws.iam.RolePolicy(
 ### Build trigger Lambda
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/role/">aws.iam.Role</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/iam/rolepolicyattachment/">aws.iam.RolePolicyAttachment</a> &middot; <a href="https://www.pulumi.com/registry/packages/aws/api-docs/lambda/function/">aws.lambda.Function</a></p>
 </details>
 
@@ -1956,11 +1956,11 @@ build_trigger_function = aws.lambda_.Function(
 ### Dual CodeBuild projects
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/codebuild/project/">aws.codebuild.Project</a></p>
 </details>
 
-Each agent has its own CodeBuild project. The buildspec content is read from disk at deploy time and embedded into the project definition — a SHA-256 fingerprint of the buildspec is used as a change trigger so that updating the buildspec triggers a rebuild.
+Each agent has its own CodeBuild project. The buildspec content is read from disk at deploy time and embedded into the project definition - a SHA-256 fingerprint of the buildspec is used as a change trigger so that updating the buildspec triggers a rebuild.
 
 <div class="lang-tabs" markdown="1">
 
@@ -2211,7 +2211,7 @@ specialist_image = aws.codebuild.Project(
 ### Sequential build triggers
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/lambda/invocation/">aws.lambda.Invocation</a></p>
 </details>
 
@@ -2358,7 +2358,7 @@ trigger_build_orchestrator = aws.lambda_.Invocation(
 ### Specialist AgentCore Runtime
 
 <details>
-<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
 <p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/bedrock/agentcoreagentruntime/">aws.bedrock.AgentcoreAgentRuntime</a></p>
 </details>
 
@@ -2618,8 +2618,8 @@ python test_multi_agent.py $ORCH_ARN
 
 Try two types of queries to verify the routing logic:
 
-1. A simple greeting: `"Hello, how are you?"` — the orchestrator handles this directly without calling the specialist
-2. A complex question: `"Analyze the trade-offs between microservices and monolithic architectures"` — the orchestrator delegates to the specialist
+1. A simple greeting: `"Hello, how are you?"` - the orchestrator handles this directly without calling the specialist
+2. A complex question: `"Analyze the trade-offs between microservices and monolithic architectures"` - the orchestrator delegates to the specialist
 
 You can tell which agent answered by checking the `"agent"` field in the response JSON. When the orchestrator delegates, you'll see `"agent": "specialist"` in the specialist's sub-response, wrapped in the orchestrator's response.
 
@@ -2647,7 +2647,7 @@ print(r['response'].read().decode())
 
 **Test the one-way IAM boundary.** The specialist cannot call the orchestrator because it lacks the `InvokeAgentRuntime` IAM permission. Invoke the specialist directly as shown above and confirm it responds independently. Then look at the specialist's execution role in the IAM console and verify the `OrchestratorInvokeSpecialistPolicy` is absent.
 
-**Add a second specialist.** Extend the infrastructure to create a third agent — for example, a math specialist or a code review specialist. Update the orchestrator's system prompt to route queries to the appropriate specialist. You'll need a third S3 bucket, ECR repository, execution role, and CodeBuild project, plus an update to the A2A policy to allow invoking the new runtime.
+**Add a second specialist.** Extend the infrastructure to create a third agent - for example, a math specialist or a code review specialist. Update the orchestrator's system prompt to route queries to the appropriate specialist. You'll need a third S3 bucket, ECR repository, execution role, and CodeBuild project, plus an update to the A2A policy to allow invoking the new runtime.
 
 ## What you learned
 
@@ -2655,7 +2655,7 @@ print(r['response'].read().decode())
 - A2A communication uses `bedrock-agentcore:InvokeAgentRuntime` with standard IAM permissions
 - The orchestrator discovers the specialist through an environment variable containing its ARN, which Pulumi resolves automatically from the specialist runtime resource
 - Pulumi's `dependsOn` enforces the build and deploy order: specialist first, then orchestrator
-- IAM permissions are one-directional — only the orchestrator's execution role holds the `InvokeAgentRuntime` permission
+- IAM permissions are one-directional - only the orchestrator's execution role holds the `InvokeAgentRuntime` permission
 - AgentCore handles streaming responses between agents; the orchestrator's response handler must account for multiple content-type formats
 
-Next up: [Module 4 — The full stack: weather agent with tools and memory](04-full-stack-weather-agent.md)
+Next up: [Module 4 - The full stack: weather agent with tools and memory](04-full-stack-weather-agent.md)

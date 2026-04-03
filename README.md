@@ -15,7 +15,7 @@ By the end of this workshop, you will have deployed:
 - A multi-agent system where an orchestrator delegates to a specialist
 - A full-stack weather agent that scrapes websites, runs code, remembers preferences, and writes reports to S3
 
-All infrastructure is defined as code with Pulumi TypeScript and deployed through Pulumi ESC with OIDC-based AWS credentials. No static keys anywhere.
+All infrastructure is defined as code with Pulumi (TypeScript or Python) and deployed through Pulumi ESC for centralized credential management.
 
 ## Prerequisites
 
@@ -62,7 +62,7 @@ We recommend using GitHub Codespaces with the included devcontainer for a zero-i
 
 **`pulumi up` hangs during CodeBuild**: The first build takes 5-10 minutes while Docker images are built and pushed to ECR. This is normal.
 
-**AWS credentials expired**: If you see auth errors, run `pulumi env open pulumi-idp/auth` to refresh your OIDC token, then retry.
+**AWS credentials expired**: If you see auth errors, run `pulumi env open aws-bedrock-workshop/dev` to verify your credentials are configured correctly, then retry.
 
 **Agent invocation returns 500**: Check CloudWatch Logs at `/aws/bedrock-agentcore/runtimes/` for your runtime. Common causes are missing IAM permissions or environment variables.
 
