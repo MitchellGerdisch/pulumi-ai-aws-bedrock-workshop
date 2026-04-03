@@ -18,6 +18,17 @@
         padding: 15px;
       }
     }
+    .site-header a {
+      text-decoration: none;
+      color: #6366f1;
+    }
+    .site-header a:hover {
+      text-decoration: underline;
+    }
+    .site-header h1 {
+      margin: 0;
+      font-size: 2em;
+    }
     .theme-toggle {
       position: fixed;
       top: 15px;
@@ -38,11 +49,11 @@
   </button>
 
   <article class="markdown-body">
-    <header style="margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--color-border-default);">
-      <a href="{{ '/' | relative_url }}" style="text-decoration: none; color: var(--color-fg-default);">
-        <h2 style="margin: 0;">{{ site.title }}</h2>
+    <div class="site-header" style="margin-bottom: 32px; padding-bottom: 16px; border-bottom: 2px solid #6366f1;">
+      <a href="{{ '/' | relative_url }}">
+        <h1>{{ site.title }}</h1>
       </a>
-    </header>
+    </div>
     {{ content }}
   </article>
 

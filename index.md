@@ -2,60 +2,53 @@
 title: Home
 ---
 
-# Deploying AI Agents on AWS with Pulumi and Amazon Bedrock AgentCore
-
 [![Slack](https://img.shields.io/badge/Slack-Pulumi%20Community-blueviolet?logo=slack)](https://slack.pulumi.com)
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/dirien/pulumi-ai-aws-bedrock-workshop?quickstart=1)
 
-## Workshop details
+Welcome to the Deploying AI Agents on AWS workshop.
 
-| | |
-|---|---|
-| **Duration** | 3 hours (180 minutes) |
-| **Format** | Instructor-led, hands-on |
-| **Cloud** | AWS (Amazon Bedrock AgentCore) |
-| **IaC** | Pulumi (TypeScript) |
-| **Agent framework** | Strands SDK (Python) |
+In this hands-on workshop, you'll learn how to build, deploy, and connect AI agents on AWS using Pulumi and Amazon Bedrock AgentCore. By the end, you'll have a multi-tool agent that browses the web, runs Python code, remembers user preferences, and writes reports to S3.
 
 ## What you'll build
 
-Over three hours you'll go from zero to a production-style multi-tool AI agent running on AWS. Each module adds a new capability on top of the previous one.
-
-You start with a basic agent, add authentication and policy enforcement, wire up multi-agent orchestration, and finish with a weather agent that browses the web, runs Python code, remembers user preferences, and writes reports to S3.
-
 ```mermaid
 flowchart TD
-    subgraph Module 1
-        A[Basic Agent] -->|Strands SDK| B[AgentCore Runtime]
-    end
+    O["Orchestrator Agent<br/>Coordinates delegation"]
+    style O fill:#6366f1,color:#fff,stroke:#4f46e5,stroke-width:2px
 
-    subgraph Module 2
-        C[MCP Server] -->|JWT Auth| D[Cognito]
-        C -->|Cedar Policies| E[Policy Engine]
-    end
+    O --> A["Basic Agent<br/>Q&A"]
+    O --> B["MCP Server<br/>JWT + Cedar Policies"]
+    O --> C["Specialist Agent<br/>Deep Analysis"]
+    O --> D["Weather Agent<br/>Full Stack"]
 
-    subgraph Module 3
-        F[Orchestrator] -->|A2A| G[Specialist]
-    end
+    D --> E["Browser Tool"]
+    D --> F["Code Interpreter"]
+    D --> G["Memory"]
+    D --> H["S3 Results"]
 
-    subgraph Module 4
-        H[Weather Agent] --> I[Browser Tool]
-        H --> J[Code Interpreter]
-        H --> K[Memory]
-        H --> L[S3 Results]
-    end
-
-    style A fill:#6366f1,color:#fff
-    style C fill:#6366f1,color:#fff
-    style F fill:#6366f1,color:#fff
-    style H fill:#6366f1,color:#fff
-    style B fill:#22c55e,color:#fff
-    style G fill:#22c55e,color:#fff
-    style I fill:#22c55e,color:#fff
-    style J fill:#22c55e,color:#fff
-    style K fill:#22c55e,color:#fff
-    style L fill:#22c55e,color:#fff
+    style A fill:#22c55e,color:#fff,stroke:#16a34a,stroke-width:2px
+    style B fill:#22c55e,color:#fff,stroke:#16a34a,stroke-width:2px
+    style C fill:#22c55e,color:#fff,stroke:#16a34a,stroke-width:2px
+    style D fill:#22c55e,color:#fff,stroke:#16a34a,stroke-width:2px
+    style E fill:#f59e0b,color:#fff,stroke:#d97706,stroke-width:2px
+    style F fill:#f59e0b,color:#fff,stroke:#d97706,stroke-width:2px
+    style G fill:#f59e0b,color:#fff,stroke:#d97706,stroke-width:2px
+    style H fill:#f59e0b,color:#fff,stroke:#d97706,stroke-width:2px
 ```
+
+Your agents will deploy as containerized services on AgentCore Runtime, authenticate with JWT tokens via Cognito, enforce access control with Cedar policies, and communicate agent-to-agent using IAM-scoped invocations.
+
+## Workshop chapters
+
+| Chapter | Title | Duration |
+|---------|-------|----------|
+| [00](00-setup-and-orientation.md) | Setup and orientation | 15 min |
+| [01](01-your-first-agent.md) | Your first agent on AgentCore | 30 min |
+| [02](02-mcp-server-jwt-auth.md) | Hosting an MCP server with JWT auth | 45 min |
+| [03](03-multi-agent-orchestration.md) | Multi-agent orchestration | 40 min |
+| [04](04-full-stack-weather-agent.md) | The full stack: weather agent with tools and memory | 40 min |
+| [05](05-housekeeping.md) | Cleanup | 10 min |
+| | **Total** | **180 min** |
 
 ## Speakers
 
@@ -74,23 +67,11 @@ flowchart TD
 - Python packages for testing: `pip install boto3 mcp`
 - Basic terminal familiarity
 
-We recommend **GitHub Codespaces** for a zero-install experience. Click the badge above or go to **Code > Codespaces > Create codespace on main**.
+We recommend **GitHub Codespaces** for a zero-install experience. Click the badge at the top of this page.
 
 | Machine type | Cores | RAM | Recommended |
 |-------------|-------|-----|-------------|
 | Standard | 4-core | 16 GB | Yes |
-
-## Workshop content
-
-| # | Module | Duration |
-|---|--------|----------|
-| 00 | [Setup and orientation](00-setup-and-orientation.md) | 15 min |
-| 01 | [Your first agent on AgentCore](01-your-first-agent.md) | 30 min |
-| 02 | [Hosting an MCP server with JWT auth](02-mcp-server-jwt-auth.md) | 45 min |
-| 03 | [Multi-agent orchestration](03-multi-agent-orchestration.md) | 40 min |
-| 04 | [The full stack: weather agent with tools and memory](04-full-stack-weather-agent.md) | 40 min |
-| 05 | [Cleanup](05-housekeeping.md) | 10 min |
-| | **Total** | **180 min** |
 
 ## Troubleshooting
 
