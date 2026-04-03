@@ -44,7 +44,7 @@ Your agents will deploy as containerized services on AgentCore Runtime, authenti
 |---------|-------|----------|
 | [00](00-setup-and-orientation.md) | Setup and orientation | 15 min |
 | [01](01-your-first-agent.md) | Your first agent on AgentCore | 30 min |
-| [02](02-mcp-server-jwt-auth.md) | Hosting an MCP server with JWT auth | 45 min |
+| [02](02-mcp-server-jwt-auth.md) | Hosting an MCP server behind an AgentCore Gateway | 45 min |
 | [03](03-multi-agent-orchestration.md) | Multi-agent orchestration | 40 min |
 | [04](04-full-stack-weather-agent.md) | The full stack: weather agent with tools and memory | 40 min |
 | [05](05-housekeeping.md) | Cleanup | 10 min |

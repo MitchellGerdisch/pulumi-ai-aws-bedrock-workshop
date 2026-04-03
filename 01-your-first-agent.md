@@ -1726,4 +1726,4 @@ You can also leave them running. Module 2 is a separate stack.
 - Strands' `BedrockAgentCoreApp` wraps your Python agent as an HTTP-callable service
 - `pulumi up` orchestrates the entire pipeline in the right order using `dependsOn`
 
-Next up: [Module 2 — Hosting an MCP server with JWT auth](02-mcp-server-jwt-auth.md)
+Next up: [Module 2 — Hosting an MCP server behind an AgentCore Gateway](02-mcp-server-jwt-auth.md)

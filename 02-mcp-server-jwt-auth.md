@@ -1,6 +1,6 @@
 ---
 ---
-# Module 2: Hosting an MCP server with JWT auth
+# Module 2: Hosting an MCP server behind an AgentCore Gateway
 
 **Duration:** ~45 minutes
 
@@ -8,9 +8,9 @@
 
 - What the Model Context Protocol (MCP) is and why it matters for agent-tool communication
 - How to build an MCP server with FastMCP in Python
-- How to secure it with JWT tokens from Amazon Cognito
+- How to deploy an AgentCore Gateway that secures your MCP server with JWT tokens from Cognito
 - How to use Pulumi secrets for sensitive config
-- How AgentCore's Policy Engine enforces access control using Cedar policies
+- How AgentCore's Policy Engine enforces fine-grained access control using Cedar policies
 
 ## Key concepts
 
@@ -26,9 +26,11 @@ The transport we use here is Stateless Streamable HTTP. Each request is independ
 
 ### AgentCore Gateway
 
-The [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) sits in front of your MCP server. It handles JWT token validation, routes requests to the correct runtime, and enforces access policies — all before your server code sees a single request. Your MCP server never has to deal with auth; the gateway handles it.
+The [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) is the front door for clients calling your MCP tools. It handles JWT token validation, routes requests to the correct backend, and enforces Cedar access policies — all before your server code sees a single request. Your MCP server never deals with auth; the Gateway handles it.
 
-The [AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html) is the containerized service that runs your MCP server. Like Module 1, you point it at a Docker image in ECR and AgentCore manages the rest: pulling the image, running it on ARM64 infrastructure, and routing invocations.
+A [Gateway Target](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-add-target-api-target-config.html) connects the Gateway to a backend — in our case, an AgentCore-hosted MCP server runtime. The Gateway uses its IAM role to call the runtime via SigV4-signed requests.
+
+The [AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html) is the containerized service that runs your MCP server. Like Module 1, you point it at a Docker image in ECR and AgentCore manages the rest. The runtime itself has no auth — that's the Gateway's job.
 
 ### JWT authentication with Cognito
 
@@ -53,20 +55,23 @@ sequenceDiagram
     GW-->>C: Response
 ```
 
-The `authorizerConfiguration` on the AgentCore Runtime ties your Cognito User Pool to the gateway. Only tokens issued for your specific app client are accepted.
+The `authorizerConfiguration` on the AgentCore Gateway ties your Cognito User Pool to the request flow. Only tokens issued for your specific app client are accepted.
 
-### Deployment pipeline
+### Architecture
 
-The deployment pipeline in this module is identical to Module 1, with two additions: a Cognito User Pool for JWT auth and a Lambda function to set the test user's permanent password.
+The deployment pipeline is the same as Module 1 for the MCP server container. The new pieces are the Cognito User Pool, the AgentCore Gateway, and the Gateway Target that connects them.
 
 ```mermaid
 flowchart TD
     A["MCP server code"] -->|zipped and uploaded| B["S3 bucket"]
     B -->|CodeBuild reads source| C["CodeBuild\n(ARM64 Docker build)"]
     C -->|pushes image| D["ECR repository"]
-    D -->|AgentCore pulls image| E["AgentCore Runtime\n(MCP server is live)"]
-    F["Cognito User Pool"] -->|JWT discovery URL| E
-    G["Test user + Lambda\n(sets permanent password)"] --> F
+    D -->|AgentCore pulls image| E["AgentCore Runtime\n(MCP server)"]
+
+    F["Cognito User Pool"] -->|JWT discovery URL| G["AgentCore Gateway\n(JWT auth + Cedar policies)"]
+    G -->|Gateway Target\n(SigV4 via IAM role)| E
+
+    H["Client"] -->|JWT token| G
 ```
 
 ## Step 1: Create a new Pulumi project
@@ -126,7 +131,7 @@ Set your unique stack name and store the test password in the shared ESC environ
 
 ```bash
 pulumi config set stackName agentcore-mcp-<id>
-pulumi env set pulumi-idp/auth 'pulumiConfig.mcp-server-agentcore-runtime:testPassword' '"'"'"TestPassword123"'"'"' --secret
+pulumi env set pulumi-idp/auth 'pulumiConfig.mcp-server-agentcore-runtime:testPassword' 'TestPassword123' --secret
 ```
 
 ## Step 2: Write the MCP server
@@ -1869,7 +1874,7 @@ The `triggers` map controls when the build re-runs. If the source code version, 
 
 ### MCP server runtime
 
-This is where this module differs most from Module 1. The AgentCore Runtime gets two additional configuration blocks: `protocolConfiguration` to declare MCP protocol, and `authorizerConfiguration` to wire up the Cognito JWT authorizer.
+The runtime is similar to Module 1, with one addition: `protocolConfiguration` declares this is an MCP server. Note that there is **no** `authorizerConfiguration` here — JWT auth is handled by the Gateway (next section), not the runtime.
 
 <details>
 <summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
@@ -1908,17 +1913,6 @@ const mcpServer = new aws.bedrock.AgentcoreAgentRuntime(
     protocolConfiguration: {
       serverProtocol: "MCP",
     },
-    authorizerConfiguration: {
-      customJwtAuthorizer: {
-        allowedClients: [mcpClient.id],
-        discoveryUrl: pulumi
-          .all([currentRegion, mcpUserPool.id])
-          .apply(
-            ([region, userPoolId]) =>
-              `https://cognito-idp.${region.region}.amazonaws.com/${userPoolId}/.well-known/openid-configuration`,
-          ),
-      },
-    },
     environmentVariables: {
       ...mergedEnvVars,
       SOURCE_VERSION: sourceHash,
@@ -1927,7 +1921,6 @@ const mcpServer = new aws.bedrock.AgentcoreAgentRuntime(
   {
     dependsOn: [
       triggerBuild,
-      setCognitoPassword,
       agentExecutionRolePolicy,
       agentExecutionManaged,
     ],
@@ -1964,16 +1957,6 @@ mcp_server = aws.bedrock.AgentcoreAgentRuntime(
     },
     network_configuration={"network_mode": network_mode},
     protocol_configuration={"server_protocol": "MCP"},
-    authorizer_configuration={
-        "custom_jwt_authorizer": {
-            "allowed_clients": [mcp_client.id],
-            "discovery_url": pulumi.Output.all(
-                current_region, mcp_user_pool.id
-            ).apply(
-                lambda args: f"https://cognito-idp.{args[0].region}.amazonaws.com/{args[1]}/.well-known/openid-configuration"
-            ),
-        }
-    },
     environment_variables={
         **merged_env_vars,
         "SOURCE_VERSION": source_hash,
@@ -1981,7 +1964,6 @@ mcp_server = aws.bedrock.AgentcoreAgentRuntime(
     opts=pulumi.ResourceOptions(
         depends_on=[
             trigger_build,
-            set_cognito_password,
             agent_execution_role_policy,
             agent_execution_managed,
         ]
@@ -1993,9 +1975,80 @@ mcp_server = aws.bedrock.AgentcoreAgentRuntime(
 
 </div>
 
-Two things are different from Module 1. `protocolConfiguration.serverProtocol` tells AgentCore this is an MCP server, not a regular agent. And `authorizerConfiguration.customJwtAuthorizer` ties the gateway to your Cognito User Pool: `discoveryUrl` is the OIDC discovery endpoint and `allowedClients` restricts access to tokens issued for your app client ID.
+`protocolConfiguration.serverProtocol: "MCP"` tells AgentCore this container speaks MCP, not the regular agent invocation protocol.
 
-The `dependsOn` list now includes `setCognitoPassword` / `set_cognito_password` — the runtime should only be created once the test user is fully set up.
+### AgentCore Gateway
+
+The [Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) is the front door for clients. It validates JWT tokens from Cognito before forwarding requests to the MCP server. This separation means your MCP server code never has to deal with auth — the Gateway handles it. It also enables Cedar policy enforcement (covered later).
+
+<details>
+<summary><strong>Want to know more?</strong> — Pulumi Registry</summary>
+<p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/bedrock/agentcoregateway/">aws.bedrock.AgentcoreGateway</a></p>
+</details>
+
+<div class="lang-tabs" markdown="1">
+
+<div class="lang-tab" data-lang="typescript" markdown="1">
+
+```typescript
+const mcpGateway = new aws.bedrock.AgentcoreGateway("mcp_gateway", {
+  name: `${stackName}-mcp-gateway`,
+  description: `MCP Gateway with JWT auth for ${stackName}`,
+  protocolType: "MCP",
+  roleArn: agentExecution.arn,
+  authorizerType: "CUSTOM_JWT",
+  authorizerConfiguration: {
+    customJwtAuthorizer: {
+      allowedClients: [mcpClient.id],
+      discoveryUrl: pulumi
+        .all([currentRegion, mcpUserPool.id])
+        .apply(
+          ([region, userPoolId]) =>
+            `https://cognito-idp.${region.region}.amazonaws.com/${userPoolId}/.well-known/openid-configuration`,
+        ),
+    },
+  },
+  tags: {
+    Name: `${stackName}-mcp-gateway`,
+    Module: "Gateway",
+  },
+});
+```
+
+</div>
+
+<div class="lang-tab" data-lang="python" markdown="1">
+
+```python
+mcp_gateway = aws.bedrock.AgentcoreGateway(
+    "mcp_gateway",
+    name=f"{stack_name}-mcp-gateway",
+    description=f"MCP Gateway with JWT auth for {stack_name}",
+    protocol_type="MCP",
+    role_arn=agent_execution.arn,
+    authorizer_type="CUSTOM_JWT",
+    authorizer_configuration={
+        "custom_jwt_authorizer": {
+            "allowed_clients": [mcp_client.id],
+            "discovery_url": pulumi.Output.all(
+                current_region, mcp_user_pool.id
+            ).apply(
+                lambda args: f"https://cognito-idp.{args[0].region}.amazonaws.com/{args[1]}/.well-known/openid-configuration"
+            ),
+        }
+    },
+    tags={
+        "Name": f"{stack_name}-mcp-gateway",
+        "Module": "Gateway",
+    },
+)
+```
+
+</div>
+
+</div>
+
+The `authorizerConfiguration.customJwtAuthorizer` ties the Gateway to your Cognito User Pool. `discoveryUrl` is the OIDC discovery endpoint and `allowedClients` restricts access to tokens issued for your app client ID. The Gateway exposes a URL (`gatewayUrl`) that clients use instead of calling the runtime directly.
 
 ### Outputs
 
@@ -2032,6 +2085,9 @@ export const getTokenCommand = pulumi
     ([clientId, region, password]) =>
       `python get_token.py ${clientId} ${testUserName} '${password}' ${region.region}`,
   );
+export const gatewayId = mcpGateway.gatewayId;
+export const gatewayArn = mcpGateway.gatewayArn;
+export const gatewayUrl = mcpGateway.gatewayUrl;
 ```
 
 </div>
@@ -2067,6 +2123,9 @@ pulumi.export(
         lambda args: f"python get_token.py {args[0]} {test_user_name} '{args[2]}' {args[1].region}"
     ),
 )
+pulumi.export("gatewayId", mcp_gateway.gateway_id)
+pulumi.export("gatewayArn", mcp_gateway.gateway_arn)
+pulumi.export("gatewayUrl", mcp_gateway.gateway_url)
 ```
 
 </div>
@@ -2081,9 +2140,36 @@ pulumi.export(
 pulumi up
 ```
 
-Same 5-10 minute wait for CodeBuild. At the end, Pulumi outputs the runtime ARN, Cognito client ID, and a handy `getTokenCommand`.
+Same 5-10 minute wait for CodeBuild. At the end, Pulumi outputs the runtime ARN, gateway URL, Cognito client ID, and a handy `getTokenCommand`.
 
-## Step 8: Get a JWT token and test
+## Step 8: Connect the Gateway to the MCP runtime
+
+The Gateway is deployed, but it doesn't know about the MCP server yet. You need to create a **Gateway Target** that points the Gateway to the runtime's invocation endpoint. This step uses the AWS SDK because the Pulumi providers don't yet support the `iamCredentialProvider` field required for AgentCore runtime targets.
+
+```bash
+pulumi env run pulumi-idp/auth -- python3 -c "
+import boto3, json, urllib.parse
+client = boto3.client('bedrock-agentcore-control', region_name='$(pulumi stack output cognitoDiscoveryUrl | grep -oP \"(?<=cognito-idp\.)[^.]+\")')
+agent_arn = '$(pulumi stack output agentRuntimeArn)'
+encoded_arn = urllib.parse.quote(agent_arn, safe='')
+endpoint = f'https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/{encoded_arn}/invocations?qualifier=DEFAULT'
+r = client.create_gateway_target(
+    gatewayIdentifier='$(pulumi stack output gatewayId)',
+    name='mcp-server-target',
+    description='Target for AgentCore-hosted MCP server',
+    targetConfiguration={'mcp': {'mcpServer': {'endpoint': endpoint}}},
+    credentialProviderConfigurations=[{
+        'credentialProviderType': 'GATEWAY_IAM_ROLE',
+        'credentialProvider': {'iamCredentialProvider': {'service': 'bedrock-agentcore'}}
+    }]
+)
+print(json.dumps({'targetId': r['targetId'], 'status': r['status']}, default=str))
+"
+```
+
+The `GATEWAY_IAM_ROLE` credential provider tells the Gateway to sign requests to the runtime using SigV4 with `service: "bedrock-agentcore"`. Wait about 20 seconds for the target status to become `READY`.
+
+## Step 9: Get a JWT token and test
 
 First, get a token from Cognito. Pulumi outputs a ready-to-run command:
 
@@ -2091,26 +2177,26 @@ First, get a token from Cognito. Pulumi outputs a ready-to-run command:
 pulumi stack output getTokenCommand --show-secrets
 ```
 
-Copy and run the printed command. It calls `get_token.py` (copy from `02-solution/typescript/get_token.py`) and prints a JWT token. Export it:
+Copy and run the printed command. It calls `get_token.py` (copy from the solution folder) and prints a JWT token. Export it:
 
 ```bash
 export JWT_TOKEN="<paste the token here>"
 ```
 
-Now test the MCP server. Copy `test_mcp_server.py` from the solution folder and run:
+Now test the MCP server through the Gateway. Copy `test_mcp_server.py` from the solution folder and run:
 
 ```bash
-export AGENT_ARN=$(pulumi stack output agentRuntimeArn)
-python test_mcp_server.py $AGENT_ARN $JWT_TOKEN
+export GATEWAY_URL=$(pulumi stack output gatewayUrl)
+python test_mcp_server.py $GATEWAY_URL $JWT_TOKEN
 ```
 
-You should see the three tools listed and their results:
+You should see the three tools listed (prefixed with the target name) and their results:
 
-- `add_numbers(5, 3)` returns `8`
-- `multiply_numbers(4, 7)` returns `28`
-- `greet_user('Alice')` returns `Hello, Alice! Nice to meet you.`
+- `mcp-server-target___add_numbers(5, 3)` returns `8`
+- `mcp-server-target___multiply_numbers(4, 7)` returns `28`
+- `mcp-server-target___greet_user('Alice')` returns `Hello, Alice! Nice to meet you.`
 
-Try calling without the token (or with a fake one) and you'll get an authorization error. The JWT authorizer is doing its job.
+Try calling without the token (or with a fake one) and you'll get an authorization error. The Gateway's JWT authorizer is doing its job.
 
 ## Try it yourself
 
@@ -2129,110 +2215,159 @@ Redeploy with `pulumi up`, get a fresh token, and call your new tool with the te
 
 ## Policy enforcement with Cedar
 
-Now that your MCP server is secured with JWT, let's add another layer: a Policy Engine that controls which tools each user can call.
+Now that your MCP server is secured with JWT via the Gateway, let's add another layer: a **Policy Engine** that controls which tools each user can call.
 
 ### What is the Policy Engine?
 
-The AgentCore Policy Engine sits between agents (or users) and tools. It evaluates every tool call against a set of Cedar policies and decides whether to allow or deny the request. Cedar is an open-source policy language developed by AWS, originally used in Amazon Verified Permissions.
+The AgentCore [Policy Engine](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html) sits inside the Gateway. It evaluates every tool call against a set of [Cedar](https://www.cedarpolicy.com/) policies and decides whether to allow or deny the request. Cedar is an open-source policy language developed by AWS, originally used in Amazon Verified Permissions.
 
-The key idea is default-deny. If no policy explicitly permits a request, it's denied. This means you define what's allowed, and everything else is blocked.
+The key idea is **default-deny**. If no policy explicitly permits a request, it's denied. You define what's allowed, and everything else is blocked.
 
 ### How it works
 
 ```mermaid
 flowchart TD
-    A["Agent / User calls tool"] --> B["AgentCore Gateway receives request"]
+    A["Client calls tool via Gateway URL"] --> B["Gateway validates JWT token"]
     B --> C["Policy Engine evaluates Cedar policies"]
-    C -->|ALLOW| D["Tool executes normally"]
-    C -->|DENY| E["Request blocked, error returned"]
+    C -->|ALLOW| D["Gateway forwards to MCP server"]
+    D --> E["Tool executes, result returned"]
+    C -->|DENY| F["Request blocked\nTool Execution Denied"]
 ```
 
 Policies have three components:
 
-- **Principal**: Who is making the request (identified by JWT `sub` claim)
-- **Action**: Which tool is being called (e.g., `add_numbers`)
-- **Resource**: Which Gateway ARN the request targets
+- **Principal**: Who is making the request (type `AgentCore::OAuthUser` for JWT-authenticated users)
+- **Action**: Which tool is being called (e.g., `AgentCore::Action::"mcp-server-target___add_numbers"`)
+- **Resource**: Which Gateway the request targets (e.g., `AgentCore::Gateway::"<GATEWAY_ARN>"`)
 
-### Step 9: Create a Policy Engine
+Note that the Gateway prefixes tool names with the target name and `___` (three underscores).
+
+### Step 10: Create a Policy Engine
+
+Policy Engine and Policy resources are not yet available as Pulumi resources, so we use the AWS CLI via `pulumi env run`:
 
 ```bash
-aws bedrock-agentcore-control create-policy-engine \
-  --name workshop-policy-engine \
-  --description "Policy engine for MCP workshop"
+pulumi env run pulumi-idp/auth -- aws bedrock-agentcore-control create-policy-engine \
+  --name workshop_policy_engine \
+  --description "Policy engine for MCP workshop" \
+  --region us-east-1
 ```
 
-Note the `policyEngineId` from the response. You'll need it for the next steps.
+Note the `policyEngineId` from the response. Wait a few seconds for the status to become `ACTIVE`.
 
-### Step 10: Add a Cedar policy
+### Step 11: Add a Cedar policy
 
-Let's create a policy that only allows calling `add_numbers` and `greet_user`, but blocks `multiply_numbers`:
+Create a policy that allows `add_numbers` and `greet_user` but implicitly denies `multiply_numbers`. First, store your gateway ARN:
 
 ```bash
-aws bedrock-agentcore-control create-policy \
-  --policy-engine-id <YOUR_POLICY_ENGINE_ID> \
-  --name allow-add-and-greet \
-  --validation-mode FAIL_ON_ANY_FINDINGS \
-  --description "Allow add_numbers and greet_user only" \
-  --definition '{
-    "cedar": {
-      "statement": "permit(principal is AgentCore::OAuthUser, action in [AgentCore::Action::\"add_numbers\", AgentCore::Action::\"greet_user\"], resource == AgentCore::Gateway::\"<YOUR_GATEWAY_ARN>\");"
+export GATEWAY_ARN=$(pulumi stack output gatewayArn)
+export POLICY_ENGINE_ID=<paste policyEngineId from previous step>
+```
+
+Create a JSON file with the Cedar policy statement:
+
+```bash
+cat > /tmp/cedar-policy.json << EOF
+{
+  "cedar": {
+    "statement": "permit(principal is AgentCore::OAuthUser, action in [AgentCore::Action::\"mcp-server-target___add_numbers\", AgentCore::Action::\"mcp-server-target___greet_user\"], resource == AgentCore::Gateway::\"${GATEWAY_ARN}\");"
+  }
+}
+EOF
+```
+
+Then create the policy:
+
+```bash
+pulumi env run pulumi-idp/auth -- aws bedrock-agentcore-control create-policy \
+  --policy-engine-id $POLICY_ENGINE_ID \
+  --name allow_add_and_greet \
+  --description "Allow add_numbers and greet_user only - deny multiply_numbers" \
+  --definition "file:///tmp/cedar-policy.json" \
+  --region us-east-1
+```
+
+This Cedar policy reads: "Allow any authenticated OAuth user to call `add_numbers` and `greet_user` on this specific Gateway." Since Cedar is default-deny, `multiply_numbers` is implicitly blocked.
+
+### Step 12: Attach the Policy Engine to the Gateway
+
+Attach the policy engine to your Gateway in `ENFORCE` mode:
+
+```bash
+export GATEWAY_ID=$(pulumi stack output gatewayId)
+export POLICY_ENGINE_ARN=<paste policyEngineArn from step 10>
+
+pulumi env run pulumi-idp/auth -- python3 -c "
+import boto3
+client = boto3.client('bedrock-agentcore-control', region_name='us-east-1')
+client.update_gateway(
+    gatewayIdentifier='${GATEWAY_ID}',
+    name='$(pulumi stack output gatewayId | sed "s/-[^-]*$//")',
+    roleArn='$(pulumi stack output agentExecutionRoleArn)',
+    protocolType='MCP',
+    authorizerType='CUSTOM_JWT',
+    authorizerConfiguration={
+        'customJWTAuthorizer': {
+            'discoveryUrl': '$(pulumi stack output cognitoDiscoveryUrl)',
+            'allowedClients': ['$(pulumi stack output cognitoUserPoolClientId)']
+        }
+    },
+    policyEngineConfiguration={
+        'arn': '${POLICY_ENGINE_ARN}',
+        'mode': 'ENFORCE'
     }
-  }'
+)
+print('Policy engine attached in ENFORCE mode')
+"
 ```
 
-Replace `<YOUR_GATEWAY_ARN>` with your MCP server's runtime ARN.
+Wait about 15 seconds for the Gateway to update.
 
-This Cedar policy reads: "Allow any authenticated OAuth user to call `add_numbers` and `greet_user` on this specific gateway." Since the default is deny, `multiply_numbers` is implicitly blocked.
+### Step 13: Test policy enforcement
 
-### Step 11: Generate policies from natural language
-
-Instead of writing Cedar by hand, you can generate policies from plain English:
+Get a fresh JWT token and run the test script again:
 
 ```bash
-aws bedrock-agentcore-control start-policy-generation \
-  --policy-engine-id <YOUR_POLICY_ENGINE_ID> \
-  --policy-description "Allow authenticated users to add numbers and greet users, but deny multiplication" \
-  --gateway-arn <YOUR_GATEWAY_ARN>
+export GATEWAY_URL=$(pulumi stack output gatewayUrl)
+export JWT_TOKEN="<get a fresh token>"
+python test_mcp_server.py $GATEWAY_URL $JWT_TOKEN
 ```
 
-The service analyzes your gateway's tools and generates a valid Cedar policy. Generated policies expire after 7 days, so review and create them promptly.
+This time, `add_numbers` and `greet_user` work as before, but `multiply_numbers` returns:
 
-### Step 12: Test in LOG_ONLY mode
+```text
+Tool Execution Denied: Tool call not allowed due to policy enforcement
+[No policy applies to the request (denied by default).]
+```
 
-Associate the policy engine with your gateway in `LOG_ONLY` mode. In this mode, the engine evaluates policies and logs the decisions, but doesn't actually block anything:
+That's Cedar in action — default-deny blocks any tool not explicitly permitted.
+
+### Clean up Cedar resources
+
+When you're done experimenting, remove the policy engine from the Gateway and delete the resources:
 
 ```bash
-aws bedrock-agentcore update-gateway \
-  --gateway-arn <YOUR_GATEWAY_ARN> \
-  --policy-engine-arn <YOUR_POLICY_ENGINE_ARN> \
-  --policy-engine-mode LOG_ONLY
+# Detach policy engine (re-run the update_gateway without policyEngineConfiguration)
+# Delete policy, then policy engine
+pulumi env run pulumi-idp/auth -- aws bedrock-agentcore-control delete-policy \
+  --policy-engine-id $POLICY_ENGINE_ID \
+  --policy-id <YOUR_POLICY_ID> \
+  --region us-east-1
+
+pulumi env run pulumi-idp/auth -- aws bedrock-agentcore-control delete-policy-engine \
+  --policy-engine-id $POLICY_ENGINE_ID \
+  --region us-east-1
 ```
-
-Run your test script again. All three tools should still work, but check CloudWatch Logs to see the policy decisions. You'll see `ALLOW` for `add_numbers` and `greet_user`, and `DENY` for `multiply_numbers`.
-
-### Step 13: Switch to ENFORCE mode
-
-Once you're satisfied with the policy decisions in the logs:
-
-```bash
-aws bedrock-agentcore update-gateway \
-  --gateway-arn <YOUR_GATEWAY_ARN> \
-  --policy-engine-arn <YOUR_POLICY_ENGINE_ARN> \
-  --policy-engine-mode ENFORCE
-```
-
-Now run the test script again. `add_numbers` and `greet_user` should still work, but `multiply_numbers` will return an authorization error.
-
-That's the workflow: write a policy (or generate one from plain English), validate in LOG_ONLY mode, then flip to ENFORCE when you're confident.
 
 ## What you learned
 
 - [MCP](https://modelcontextprotocol.io/) is a standard protocol for agent-tool communication over HTTP
-- [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) sits in front of your MCP server and handles JWT validation
-- [AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html) with `serverProtocol: "MCP"` tells AgentCore this is an MCP server
-- Cognito provides JWT tokens; AgentCore validates them at the gateway before any request reaches your code
+- [AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html) with `serverProtocol: "MCP"` hosts the MCP server container
+- [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) sits in front of the runtime, handling JWT validation and policy enforcement
+- The Gateway connects to the runtime via a Gateway Target with `GATEWAY_IAM_ROLE` credential provider (SigV4 auth)
+- Cognito provides JWT tokens; the Gateway validates them before any request reaches your MCP server code
 - Pulumi secrets encrypt sensitive config values like passwords — they're masked in output and encrypted in state
-- Cedar policies use a default-deny model: everything is blocked unless explicitly permitted
-- The Policy Engine workflow is: create engine, add policies, test in LOG_ONLY, switch to ENFORCE
+- [Cedar](https://www.cedarpolicy.com/) policies use a default-deny model: everything is blocked unless explicitly permitted
+- The Policy Engine workflow is: create engine, add policies, attach to Gateway in ENFORCE mode
 
 Next up: [Module 3 — Multi-agent orchestration](03-multi-agent-orchestration.md)

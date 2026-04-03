@@ -686,6 +686,30 @@ mcp_server = aws.bedrock.AgentcoreAgentRuntime(
     },
     network_configuration={"network_mode": network_mode},
     protocol_configuration={"server_protocol": "MCP"},
+    environment_variables={
+        **merged_env_vars,
+        "SOURCE_VERSION": source_hash,
+    },
+    opts=pulumi.ResourceOptions(
+        depends_on=[
+            trigger_build,
+            agent_execution_role_policy,
+            agent_execution_managed,
+        ]
+    ),
+)
+
+# ============================================================================
+# AgentCore Gateway - JWT Auth Frontend for MCP Server
+# ============================================================================
+
+mcp_gateway = aws.bedrock.AgentcoreGateway(
+    "mcp_gateway",
+    name=f"{stack_name}-mcp-gateway",
+    description=f"MCP Gateway with JWT auth for {stack_name}",
+    protocol_type="MCP",
+    role_arn=agent_execution.arn,
+    authorizer_type="CUSTOM_JWT",
     authorizer_configuration={
         "custom_jwt_authorizer": {
             "allowed_clients": [mcp_client.id],
@@ -696,18 +720,10 @@ mcp_server = aws.bedrock.AgentcoreAgentRuntime(
             ),
         }
     },
-    environment_variables={
-        **merged_env_vars,
-        "SOURCE_VERSION": source_hash,
+    tags={
+        "Name": f"{stack_name}-mcp-gateway",
+        "Module": "Gateway",
     },
-    opts=pulumi.ResourceOptions(
-        depends_on=[
-            trigger_build,
-            set_cognito_password,
-            agent_execution_role_policy,
-            agent_execution_managed,
-        ]
-    ),
 )
 
 # ============================================================================
@@ -742,3 +758,6 @@ pulumi.export(
         lambda args: f"python get_token.py {args[0]} {test_user_name} '{args[2]}' {args[1].region}"
     ),
 )
+pulumi.export("gatewayId", mcp_gateway.gateway_id)
+pulumi.export("gatewayArn", mcp_gateway.gateway_arn)
+pulumi.export("gatewayUrl", mcp_gateway.gateway_url)

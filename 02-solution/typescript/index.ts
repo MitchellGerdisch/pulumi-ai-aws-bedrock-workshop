@@ -694,17 +694,6 @@ const mcpServer = new aws.bedrock.AgentcoreAgentRuntime(
     protocolConfiguration: {
       serverProtocol: "MCP",
     },
-    authorizerConfiguration: {
-      customJwtAuthorizer: {
-        allowedClients: [mcpClient.id],
-        discoveryUrl: pulumi
-          .all([currentRegion, mcpUserPool.id])
-          .apply(
-            ([region, userPoolId]) =>
-              `https://cognito-idp.${region.region}.amazonaws.com/${userPoolId}/.well-known/openid-configuration`,
-          ),
-      },
-    },
     environmentVariables: {
       ...mergedEnvVars,
       SOURCE_VERSION: sourceHash,
@@ -713,12 +702,38 @@ const mcpServer = new aws.bedrock.AgentcoreAgentRuntime(
   {
     dependsOn: [
       triggerBuild,
-      setCognitoPassword,
       agentExecutionRolePolicy,
       agentExecutionManaged,
     ],
   },
 );
+
+// ============================================================================
+// AgentCore Gateway - JWT Auth Frontend for MCP Server
+// ============================================================================
+
+const mcpGateway = new aws.bedrock.AgentcoreGateway("mcp_gateway", {
+  name: `${stackName}-mcp-gateway`,
+  description: `MCP Gateway with JWT auth for ${stackName}`,
+  protocolType: "MCP",
+  roleArn: agentExecution.arn,
+  authorizerType: "CUSTOM_JWT",
+  authorizerConfiguration: {
+    customJwtAuthorizer: {
+      allowedClients: [mcpClient.id],
+      discoveryUrl: pulumi
+        .all([currentRegion, mcpUserPool.id])
+        .apply(
+          ([region, userPoolId]) =>
+            `https://cognito-idp.${region.region}.amazonaws.com/${userPoolId}/.well-known/openid-configuration`,
+        ),
+    },
+  },
+  tags: {
+    Name: `${stackName}-mcp-gateway`,
+    Module: "Gateway",
+  },
+});
 
 // ============================================================================
 // Outputs
@@ -752,3 +767,6 @@ export const getTokenCommand = pulumi
     ([clientId, region, password]) =>
       `python get_token.py ${clientId} ${testUserName} '${password}' ${region.region}`,
   );
+export const gatewayId = mcpGateway.gatewayId;
+export const gatewayArn = mcpGateway.gatewayArn;
+export const gatewayUrl = mcpGateway.gatewayUrl;
