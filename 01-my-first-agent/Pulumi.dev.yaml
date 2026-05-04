@@ -1,0 +1,10 @@
+config:
+  aws:defaultTags:
+    tags:
+      workshop: austin-testrun
+  aws:region: us-east-1
+  my-first-agent:stackName: agentcore-basic-mitchg
+  pulumi:tags:
+    pulumi:template: aws-typescript
+environment:
+  - aws-bedrock-workshop/dev
