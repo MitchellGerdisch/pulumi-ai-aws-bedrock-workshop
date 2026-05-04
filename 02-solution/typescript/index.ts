@@ -736,6 +736,35 @@ const mcpGateway = new aws.bedrock.AgentcoreGateway("mcp_gateway", {
 });
 
 // ============================================================================
+// AgentCore Gateway Target - Points Gateway to the MCP Server Runtime
+// ============================================================================
+
+const mcpGatewayTarget = new aws.bedrock.AgentcoreGatewayTarget(
+  "mcp_gateway_target",
+  {
+    name: `${stackName}-mcp-gateway-target`,
+    description: `Target for AgentCore-hosted MCP server for ${stackName}`,
+    gatewayIdentifier: mcpGateway.gatewayId,
+    credentialProviderConfiguration: {
+      gatewayIamRole: {},
+    },
+    targetConfiguration: {
+      mcp: {
+        mcpServer: {
+          endpoint: pulumi
+            .all([currentRegion, mcpServer.agentRuntimeArn])
+            .apply(
+              ([region, arn]) =>
+                `https://bedrock-agentcore.${region.region}.amazonaws.com/runtimes/${encodeURIComponent(arn)}/invocations?qualifier=DEFAULT`,
+            ),
+        },
+      },
+    },
+  },
+  { dependsOn: [mcpGateway, mcpServer] },
+);
+
+// ============================================================================
 // Outputs
 // ============================================================================
 
@@ -770,3 +799,4 @@ export const getTokenCommand = pulumi
 export const gatewayId = mcpGateway.gatewayId;
 export const gatewayArn = mcpGateway.gatewayArn;
 export const gatewayUrl = mcpGateway.gatewayUrl;
+export const gatewayTargetId = mcpGatewayTarget.targetId;
