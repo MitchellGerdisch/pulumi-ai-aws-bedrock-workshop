@@ -1,5 +1,6 @@
 import * as pulumi from "@pulumi/pulumi";
 import * as aws from "@pulumi/aws";
+import * as command from "@pulumi/command";
 
 // ============================================================================
 // Configuration
@@ -7,6 +8,7 @@ import * as aws from "@pulumi/aws";
 
 const config = new pulumi.Config();
 const workshopTitle = config.get("workshopTitle") || "Workshop Credentials";
+const workshopName = config.require("workshopName");
 // Extra display values merged onto the credential page (optional – IAM creds are always added automatically)
 const extraValues = config.getObject<Record<string, string>>("values") ?? {};
 // Bump this value (e.g. "2", "3") to rotate the workshop participant's access key on the next `pulumi up`
@@ -16,7 +18,7 @@ const keyVersion = config.get("keyVersion") ?? "1";
 // Generate HTML
 // ============================================================================
 
-function buildEscYaml(kvPairs: Record<string, string>): string {
+function buildEscYaml(kvPairs: Record<string, string>, workshopName: string): string {
   const lines: string[] = ["values:", "  secrets:"];
   for (const [k, v] of Object.entries(kvPairs)) {
     lines.push(`    ${k}:`);
@@ -28,14 +30,18 @@ function buildEscYaml(kvPairs: Record<string, string>): string {
   }
   lines.push("  pulumiConfig:");
   lines.push("    aws:region: us-east-1");
+  lines.push("    aws:defaultTags:");
+  lines.push("      tags:");
+  lines.push(`        workshop: ${workshopName}`);
   return lines.join("\n");
 }
 
 function generateHtml(
   title: string,
   kvPairs: Record<string, string>,
+  workshopName: string,
 ): string {
-  const escYaml = buildEscYaml(kvPairs);
+  const escYaml = buildEscYaml(kvPairs, workshopName);
   const yamlHtml = escYaml
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -228,30 +234,7 @@ const workshopPolicy = new aws.iam.Policy("workshop_policy", {
       {
         Sid: "S3Access",
         Effect: "Allow",
-        Action: [
-          "s3:CreateBucket",
-          "s3:DeleteBucket",
-          "s3:ListBucket",
-          "s3:ListAllMyBuckets",
-          "s3:GetBucketLocation",
-          "s3:GetBucketVersioning",
-          "s3:GetBucketPolicy",
-          "s3:GetBucketPublicAccessBlock",
-          "s3:GetBucketTagging",
-          "s3:GetBucketAcl",
-          "s3:PutBucketVersioning",
-          "s3:PutBucketPolicy",
-          "s3:PutBucketPublicAccessBlock",
-          "s3:PutBucketTagging",
-          "s3:PutBucketAcl",
-          "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject",
-          "s3:GetObjectTagging",
-          "s3:PutObjectTagging",
-          "s3:GetObjectVersion",
-          "s3:DeleteObjectVersion",
-        ],
+        Action: ["s3:*"],
         Resource: "*",
       },
       {
@@ -280,6 +263,7 @@ const workshopPolicy = new aws.iam.Policy("workshop_policy", {
           "ecr:DescribeImages",
           "ecr:TagResource",
           "ecr:UntagResource",
+          "ecr:ListTagsForResource",
           "ecr:PutImageTagMutability",
           "ecr:PutImageScanningConfiguration",
         ],
@@ -305,22 +289,7 @@ const workshopPolicy = new aws.iam.Policy("workshop_policy", {
       {
         Sid: "LambdaAccess",
         Effect: "Allow",
-        Action: [
-          "lambda:CreateFunction",
-          "lambda:DeleteFunction",
-          "lambda:GetFunction",
-          "lambda:GetFunctionConfiguration",
-          "lambda:UpdateFunctionCode",
-          "lambda:UpdateFunctionConfiguration",
-          "lambda:InvokeFunction",
-          "lambda:AddPermission",
-          "lambda:RemovePermission",
-          "lambda:GetPolicy",
-          "lambda:ListFunctions",
-          "lambda:TagResource",
-          "lambda:UntagResource",
-          "lambda:ListTags",
-        ],
+        Action: ["lambda:*"],
         Resource: "*",
       },
       {
@@ -484,7 +453,7 @@ const allValues = pulumi
   }));
 
 const htmlContent = allValues.apply((vals: Record<string, string>) =>
-  generateHtml(workshopTitle, vals),
+  generateHtml(workshopTitle, vals, workshopName),
 );
 
 const indexHtml = new aws.s3.BucketObjectv2("index", {
@@ -576,6 +545,12 @@ new aws.s3.BucketPolicy("site", {
 // ============================================================================
 
 export const siteUrl = pulumi.interpolate`https://${distribution.domainName}`;
+
+const shortUrl = new command.local.Command("shortUrl", {
+    create: siteUrl.apply(url => `curl -sf "https://tinyurl.com/api-create.php?url=${encodeURIComponent(url)}"`),
+}, { dependsOn: [indexHtml] });
+
+export const workshopUrl = shortUrl.stdout;
 export const distributionId = distribution.id;
 export const bucketName = siteBucket.id;
 export const workshopIamUser = workshopParticipant.name;

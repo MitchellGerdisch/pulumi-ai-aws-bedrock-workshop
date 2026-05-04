@@ -1673,7 +1673,8 @@ if __name__ == "__main__":
 Run it:
 
 ```bash
-python test_basic_agent.py $AGENT_ARN
+# Use Pulumi ESC to set the AWS credentials needed by the test script.
+pulumi env run aws-bedrock-workshop/dev -- python test_basic_agent.py $AGENT_ARN
 ```
 
 You should see a response from your agent.
@@ -1693,7 +1694,7 @@ client = boto3.client('bedrock-agentcore', region_name='us-east-1')
 r = client.invoke_agent_runtime(
     agentRuntimeArn='$(pulumi stack output agentRuntimeArn)',
     qualifier='DEFAULT',
-    payload=json.dumps({'prompt': 'Write a limerick about infrastructure as code'}),
+    payload=json.dumps({'prompt': 'Write a limerick about Pulumi infrastructure as code'}),
 )
 print(json.loads(r['response'].read().decode())['response'])
 "
@@ -1707,15 +1708,14 @@ pulumi config set --path 'environmentVariables.AGENT_MODE' 'verbose'
 
 Then read `os.getenv("AGENT_MODE")` in your Python code and change the agent's behavior based on it. Redeploy with `pulumi up`.
 
-## Step 8: Clean up (optional)
+## Step 8: Clean up
 
-If you want to tear down the resources before moving on:
+Module 2 is a separate stack.
+Tear down the resources before moving on:
 
 ```bash
 pulumi destroy --yes
 ```
-
-You can also leave them running. Module 2 is a separate stack.
 
 ## What you learned
 
