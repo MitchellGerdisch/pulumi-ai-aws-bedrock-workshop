@@ -148,7 +148,7 @@ Verify the environment works:
 pulumi env open aws-bedrock-workshop/dev
 ```
 
-You should see the AWS credentials (with secret values masked) and the `aws:region` config. If you see an error, double-check that the project name is `aws-bedrock-workshop` and the environment name is `dev`.
+You should see the AWS credentials and the `aws:region` config. If you see an error, double-check that the project name is `aws-bedrock-workshop` and the environment name is `dev`.
 
 ## Step 3: Verify your setup
 
