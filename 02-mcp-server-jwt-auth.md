@@ -1664,6 +1664,23 @@ const buildspecFingerprint = createHash("sha256")
   .update(buildspecContent)
   .digest("hex");
 
+// Hash all files in mcp-server-code/ to detect source changes
+function hashDirectory(dir: string): string {
+  const hash = createHash("sha256");
+  const files = fs.readdirSync(dir, { recursive: true }) as string[];
+  for (const file of files.sort()) {
+    const filePath = path.join(dir, file);
+    if (fs.statSync(filePath).isFile()) {
+      hash.update(fs.readFileSync(filePath));
+    }
+  }
+  return hash.digest("hex");
+}
+
+const sourceCodeFingerprint = hashDirectory(
+  path.resolve(__dirname, "mcp-server-code"),
+);
+
 const agentImage = new aws.codebuild.Project("agent_image", {
   name: agentImageProjectName,
   description: `Build MCP server Docker image for ${stackName}`,
@@ -1727,6 +1744,22 @@ buildspec_path = os.path.join(os.path.dirname(__file__), "buildspec.yml")
 with open(buildspec_path) as f:
     buildspec_content = f.read()
 buildspec_fingerprint = hashlib.sha256(buildspec_content.encode()).hexdigest()
+
+
+def hash_directory(directory: str) -> str:
+  hasher = hashlib.sha256()
+  for root, dirs, files in os.walk(directory):
+    dirs.sort()
+    for filename in sorted(files):
+      file_path = os.path.join(root, filename)
+      with open(file_path, "rb") as file_obj:
+        hasher.update(file_obj.read())
+  return hasher.hexdigest()
+
+
+source_code_fingerprint = hash_directory(
+  os.path.join(os.path.dirname(__file__), "mcp-server-code")
+)
 
 agent_image = aws.codebuild.Project(
     "agent_image",
@@ -1813,6 +1846,7 @@ const triggerBuild = new aws.lambda.Invocation(
       sourceVersion: agentSourceObject.versionId,
       imageTag,
       buildspecSha256: buildspecFingerprint,
+      sourceCodeSha256: sourceCodeFingerprint,
     },
   },
   {
@@ -1853,6 +1887,7 @@ trigger_build = aws.lambda_.Invocation(
         "sourceVersion": agent_source_object.version_id,
         "imageTag": image_tag,
         "buildspecSha256": buildspec_fingerprint,
+      "sourceCodeSha256": source_code_fingerprint,
     },
     opts=pulumi.ResourceOptions(
         depends_on=[
@@ -1871,7 +1906,7 @@ trigger_build = aws.lambda_.Invocation(
 
 </div>
 
-The `triggers` map controls when the build re-runs. If the source code version, image tag, or buildspec changes, Pulumi triggers a new build. The `dependsOn` list includes `serverEcr` / `server_ecr` to ensure the repository exists before the build tries to push.
+The `triggers` map controls when the build re-runs. If the S3 object version, source code hash, image tag, or buildspec changes, Pulumi triggers a new build. The `dependsOn` list includes `serverEcr` / `server_ecr` to ensure the repository exists before the build tries to push.
 
 ### MCP server runtime
 
@@ -2054,42 +2089,218 @@ The `authorizerConfiguration.customJwtAuthorizer` ties the Gateway to your Cogni
 
 ### AgentCore Gateway Target
 
-The [Gateway Target](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-add-target-api-target-config.html) connects the Gateway to the MCP server runtime. The target's endpoint URL is the runtime's invocation endpoint, constructed from the runtime ARN. The `gatewayIamRole` credential provider tells the Gateway to sign requests to the runtime using SigV4 with the gateway's own IAM role.
+The [Gateway Target](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-add-target-api-target-config.html) connects the Gateway to the MCP server runtime. In this module, create and manage the target with a small helper script (`scripts/manage_gateway_target.py`) invoked by Pulumi. This keeps create/update/delete behavior explicit and idempotent.
 
-<details>
-<summary><strong>Want to know more?</strong> - Pulumi Registry</summary>
-<p><a href="https://www.pulumi.com/registry/packages/aws/api-docs/bedrock/agentcoregateway/">aws.bedrock.AgentcoreGatewayTarget</a></p>
-</details>
+Create the script directory:
+
+```bash
+mkdir -p scripts
+```
+
+Create `scripts/manage_gateway_target.py`:
+
+```python
+#!/usr/bin/env python3
+import argparse
+import sys
+import time
+import uuid
+
+import boto3
+from botocore.exceptions import ClientError
+
+
+MAX_ATTEMPTS = 20
+WAIT_SECONDS = 3
+
+
+def _is_transient_state_error(exc: ClientError) -> bool:
+  message = str(exc)
+  return (
+    "in Updating state" in message
+    or "in Deleting state" in message
+  )
+
+
+def _find_target_by_name(client, gateway_id: str, target_name: str):
+  next_token = None
+  while True:
+    kwargs = {"gatewayIdentifier": gateway_id, "maxResults": 100}
+    if next_token:
+      kwargs["nextToken"] = next_token
+    response = client.list_gateway_targets(**kwargs)
+    for item in response.get("items", []):
+      if item.get("name") == target_name:
+        return item
+    next_token = response.get("nextToken")
+    if not next_token:
+      return None
+
+
+def _upsert_target(
+  client,
+  region: str,
+  gateway_id: str,
+  target_name: str,
+  description: str,
+  endpoint: str,
+):
+  target_configuration = {
+    "mcp": {
+      "mcpServer": {
+        "endpoint": endpoint,
+      }
+    }
+  }
+  credential_provider_configurations = [
+    {
+      "credentialProviderType": "GATEWAY_IAM_ROLE",
+      "credentialProvider": {
+        "iamCredentialProvider": {
+          "service": "bedrock-agentcore",
+          "region": region,
+        }
+      },
+    }
+  ]
+
+  for attempt in range(MAX_ATTEMPTS):
+    existing = _find_target_by_name(client, gateway_id, target_name)
+    if existing:
+      target_id = existing["targetId"]
+      existing_endpoint = (
+        existing.get("targetConfiguration", {})
+        .get("mcp", {})
+        .get("mcpServer", {})
+        .get("endpoint")
+      )
+      if existing_endpoint != endpoint or existing.get("description") != description:
+        try:
+          client.update_gateway_target(
+            gatewayIdentifier=gateway_id,
+            targetId=target_id,
+            name=target_name,
+            description=description,
+            targetConfiguration=target_configuration,
+            credentialProviderConfigurations=credential_provider_configurations,
+          )
+        except ClientError as exc:
+          if _is_transient_state_error(exc) and attempt < MAX_ATTEMPTS - 1:
+            time.sleep(WAIT_SECONDS)
+            continue
+          raise
+      return target_id
+
+    try:
+      created = client.create_gateway_target(
+        gatewayIdentifier=gateway_id,
+        name=target_name,
+        description=description,
+        clientToken=str(uuid.uuid4()),
+        targetConfiguration=target_configuration,
+        credentialProviderConfigurations=credential_provider_configurations,
+      )
+      return created["targetId"]
+    except ClientError as exc:
+      if _is_transient_state_error(exc) and attempt < MAX_ATTEMPTS - 1:
+        time.sleep(WAIT_SECONDS)
+        continue
+      raise
+
+  raise RuntimeError("Timed out while waiting to upsert gateway target")
+
+
+def _delete_target(client, gateway_id: str, target_name: str):
+  existing = _find_target_by_name(client, gateway_id, target_name)
+  if not existing:
+    return ""
+  target_id = existing["targetId"]
+
+  for attempt in range(MAX_ATTEMPTS):
+    try:
+      client.delete_gateway_target(gatewayIdentifier=gateway_id, targetId=target_id)
+    except ClientError as exc:
+      if not _is_transient_state_error(exc) and "not found" not in str(exc).lower():
+        raise
+      if attempt == MAX_ATTEMPTS - 1:
+        raise
+
+    time.sleep(WAIT_SECONDS)
+    if not _find_target_by_name(client, gateway_id, target_name):
+      return target_id
+
+  raise RuntimeError("Timed out while waiting to delete gateway target")
+
+
+def main():
+  parser = argparse.ArgumentParser(description="Manage Bedrock AgentCore Gateway Target")
+  parser.add_argument("--mode", choices=["upsert", "delete"], required=True)
+  parser.add_argument("--region", required=True)
+  parser.add_argument("--gateway-id", required=True)
+  parser.add_argument("--target-name", required=True)
+  parser.add_argument("--description", default="")
+  parser.add_argument("--endpoint", default="")
+
+  args = parser.parse_args()
+
+  client = boto3.client("bedrock-agentcore-control", region_name=args.region)
+
+  if args.mode == "upsert":
+    if not args.endpoint:
+      raise ValueError("--endpoint is required in upsert mode")
+    target_id = _upsert_target(
+      client,
+      args.region,
+      args.gateway_id,
+      args.target_name,
+      args.description,
+      args.endpoint,
+    )
+    print(target_id)
+    return
+
+  deleted_target_id = _delete_target(client, args.gateway_id, args.target_name)
+  print(deleted_target_id)
+
+
+if __name__ == "__main__":
+  try:
+    main()
+  except Exception as exc:
+    print(f"ERROR: {exc}", file=sys.stderr)
+    raise
+```
+
+Install the Pulumi Command provider (used below for `command.local.Command`) if you have not already:
+
+<div class="lang-tabs" markdown="1">
+
+<div class="lang-tab" data-lang="typescript" markdown="1">
+
+```bash
+npm install @pulumi/command
+```
+
+</div>
+
+<div class="lang-tab" data-lang="python" markdown="1">
+
+```bash
+uv add pulumi-command
+```
+
+</div>
+
+</div>
+
+Add the command provider import in your Pulumi program:
 
 <div class="lang-tabs" markdown="1">
 
 <div class="lang-tab" data-lang="typescript" markdown="1">
 
 ```typescript
-const mcpGatewayTarget = new aws.bedrock.AgentcoreGatewayTarget(
-  "mcp_gateway_target",
-  {
-    name: `${stackName}-mcp-gateway-target`,
-    description: `Target for AgentCore-hosted MCP server for ${stackName}`,
-    gatewayIdentifier: mcpGateway.gatewayId,
-    credentialProviderConfiguration: {
-      gatewayIamRole: {},
-    },
-    targetConfiguration: {
-      mcp: {
-        mcpServer: {
-          endpoint: pulumi
-            .all([currentRegion, mcpServer.agentRuntimeArn])
-            .apply(
-              ([region, arn]) =>
-                `https://bedrock-agentcore.${region.region}.amazonaws.com/runtimes/${encodeURIComponent(arn)}/invocations?qualifier=DEFAULT`,
-            ),
-        },
-      },
-    },
-  },
-  { dependsOn: [mcpGateway, mcpServer] },
-);
+import * as command from "@pulumi/command";
 ```
 
 </div>
@@ -2097,34 +2308,125 @@ const mcpGatewayTarget = new aws.bedrock.AgentcoreGatewayTarget(
 <div class="lang-tab" data-lang="python" markdown="1">
 
 ```python
-mcp_gateway_target = aws.bedrock.AgentcoreGatewayTarget(
-    "mcp_gateway_target",
-    name=f"{stack_name}-mcp-gateway-target",
-    description=f"Target for AgentCore-hosted MCP server for {stack_name}",
-    gateway_identifier=mcp_gateway.gateway_id,
-    credential_provider_configuration={
-        "gateway_iam_role": {},
-    },
-    target_configuration={
-        "mcp": {
-            "mcp_server": {
-                "endpoint": pulumi.Output.all(
-                    current_region, mcp_server.agent_runtime_arn
-                ).apply(
-                    lambda args: f"https://bedrock-agentcore.{args[0].region}.amazonaws.com/runtimes/{urllib.parse.quote(args[1], safe='')}/invocations?qualifier=DEFAULT"
-                ),
-            },
-        },
-    },
-    opts=pulumi.ResourceOptions(depends_on=[mcp_gateway, mcp_server]),
-)
+from pulumi_command import local as command
 ```
 
 </div>
 
 </div>
 
-The endpoint URL uses the URL-encoded runtime ARN — colons and slashes in the ARN must be percent-encoded for the path segment. `qualifier=DEFAULT` selects the default (latest) runtime version.
+Now wire it into Pulumi so `upsert` runs on create/update and `delete` runs on destroy.
+
+<div class="lang-tabs" markdown="1">
+
+<div class="lang-tab" data-lang="typescript" markdown="1">
+
+```typescript
+const mcpGatewayTargetName = `${stackName}-mcp-gateway-target`;
+const mcpGatewayTargetDescription =
+  `Target for AgentCore-hosted MCP server for ${stackName} (src:${sourceCodeFingerprint.slice(0, 12)})`;
+
+const mcpServerEndpoint = pulumi
+  .all([currentRegion, mcpServer.agentRuntimeArn])
+  .apply(
+    ([region, arn]) =>
+      `https://bedrock-agentcore.${region.region}.amazonaws.com/runtimes/${encodeURIComponent(arn)}/invocations?qualifier=DEFAULT`,
+  );
+
+const mcpGatewayTarget = new command.local.Command(
+  "mcp_gateway_target",
+  {
+    create: pulumi.interpolate`python3 ${path.resolve(__dirname, "scripts/manage_gateway_target.py")} --mode upsert --region ${awsRegion} --gateway-id ${mcpGateway.gatewayId} --target-name ${mcpGatewayTargetName} --description '${mcpGatewayTargetDescription}' --endpoint '${mcpServerEndpoint}'`,
+    update: pulumi.interpolate`python3 ${path.resolve(__dirname, "scripts/manage_gateway_target.py")} --mode upsert --region ${awsRegion} --gateway-id ${mcpGateway.gatewayId} --target-name ${mcpGatewayTargetName} --description '${mcpGatewayTargetDescription}' --endpoint '${mcpServerEndpoint}'`,
+    delete: pulumi.interpolate`python3 ${path.resolve(__dirname, "scripts/manage_gateway_target.py")} --mode delete --region ${awsRegion} --gateway-id ${mcpGateway.gatewayId} --target-name ${mcpGatewayTargetName}`,
+    triggers: [
+      mcpGateway.gatewayId,
+      mcpServerEndpoint,
+      mcpGatewayTargetName,
+      mcpGatewayTargetDescription,
+      awsRegion,
+      sourceCodeFingerprint,
+    ],
+  },
+  { dependsOn: [mcpGateway, mcpServer], deleteBeforeReplace: true },
+);
+
+const gatewayTargetIdOutput = mcpGatewayTarget.stdout.apply((s) => s.trim());
+```
+
+</div>
+
+<div class="lang-tab" data-lang="python" markdown="1">
+
+```python
+mcp_gateway_target_name = f"{stack_name}-mcp-gateway-target"
+mcp_gateway_target_description = (
+  f"Target for AgentCore-hosted MCP server for {stack_name} (src:{source_code_fingerprint[:12]})"
+)
+
+mcp_server_endpoint = pulumi.Output.all(
+  current_region, mcp_server.agent_runtime_arn
+).apply(
+  lambda args: f"https://bedrock-agentcore.{args[0].region}.amazonaws.com/runtimes/{quote(args[1], safe='')}/invocations?qualifier=DEFAULT"
+)
+
+manage_target_script = os.path.join(
+  os.path.dirname(__file__), "scripts", "manage_gateway_target.py"
+)
+
+mcp_gateway_target = command.local.Command(
+  "mcp_gateway_target",
+  create=pulumi.Output.all(
+    aws_region,
+    mcp_gateway.gateway_id,
+    mcp_server_endpoint,
+  ).apply(
+    lambda args: (
+      f"python3 {manage_target_script} --mode upsert --region {args[0]} "
+      f"--gateway-id {args[1]} --target-name {mcp_gateway_target_name} "
+      f"--description '{mcp_gateway_target_description}' "
+      f"--endpoint '{args[2]}'"
+    )
+  ),
+  update=pulumi.Output.all(
+    aws_region,
+    mcp_gateway.gateway_id,
+    mcp_server_endpoint,
+  ).apply(
+    lambda args: (
+      f"python3 {manage_target_script} --mode upsert --region {args[0]} "
+      f"--gateway-id {args[1]} --target-name {mcp_gateway_target_name} "
+      f"--description '{mcp_gateway_target_description}' "
+      f"--endpoint '{args[2]}'"
+    )
+  ),
+  delete=pulumi.Output.all(aws_region, mcp_gateway.gateway_id).apply(
+    lambda args: (
+      f"python3 {manage_target_script} --mode delete --region {args[0]} "
+      f"--gateway-id {args[1]} --target-name {mcp_gateway_target_name}"
+    )
+  ),
+  triggers=[
+    mcp_gateway.gateway_id,
+    mcp_server_endpoint,
+    mcp_gateway_target_name,
+    mcp_gateway_target_description,
+    aws_region,
+    source_code_fingerprint,
+  ],
+  opts=pulumi.ResourceOptions(
+    depends_on=[mcp_gateway, mcp_server], delete_before_replace=True
+  ),
+)
+
+gateway_target_id_output = mcp_gateway_target.stdout.apply(lambda s: s.strip())
+```
+
+</div>
+
+</div>
+
+The endpoint URL uses the URL-encoded runtime ARN, and `qualifier=DEFAULT` selects the default (latest) runtime version. The helper script configures the target to use `GATEWAY_IAM_ROLE`, so the Gateway signs runtime calls with SigV4 automatically.
 
 ### Outputs
 
@@ -2164,7 +2466,7 @@ export const getTokenCommand = pulumi
 export const gatewayId = mcpGateway.gatewayId;
 export const gatewayArn = mcpGateway.gatewayArn;
 export const gatewayUrl = mcpGateway.gatewayUrl;
-export const gatewayTargetId = mcpGatewayTarget.targetId;
+export const gatewayTargetId = gatewayTargetIdOutput;
 ```
 
 </div>
@@ -2203,7 +2505,7 @@ pulumi.export(
 pulumi.export("gatewayId", mcp_gateway.gateway_id)
 pulumi.export("gatewayArn", mcp_gateway.gateway_arn)
 pulumi.export("gatewayUrl", mcp_gateway.gateway_url)
-pulumi.export("gatewayTargetId", mcp_gateway_target.target_id)
+pulumi.export("gatewayTargetId", gateway_target_id_output)
 ```
 
 </div>
@@ -2293,86 +2595,380 @@ Policies have three components:
 
 Note that the Gateway prefixes tool names with the target name and `___` (three underscores).
 
-### Step 9: Create a Policy Engine
+### Step 9: Add a Cedar policy helper script
 
-Policy Engine and Policy resources are not yet available as Pulumi resources, so we use the AWS CLI via `pulumi env run`:
+Policy Engine and Policy resources are not yet available as native Pulumi resources. Use a small helper script plus Pulumi Command provider so the full workflow is managed by `pulumi up` / `pulumi destroy`.
 
-```bash
-pulumi env run aws-bedrock-workshop/dev -- aws bedrock-agentcore-control create-policy-engine \
-  --name workshop_policy_engine \
-  --description "Policy engine for MCP workshop" \
-  --region us-east-1
-```
+Create `scripts/manage_cedar_policy.py`:
 
-Note the `policyEngineId` from the response. Wait a few seconds for the status to become `ACTIVE`.
+```python
+#!/usr/bin/env python3
+import argparse
+import sys
+import time
+import uuid
 
-### Step 10: Add a Cedar policy
-
-Create a policy that allows `add_numbers` and `greet_user` but implicitly denies `multiply_numbers`. First, store your gateway ARN:
-
-```bash
-export GATEWAY_ARN=$(pulumi stack output gatewayArn)
-export POLICY_ENGINE_ID=<paste policyEngineId from previous step>
-```
-
-Create a JSON file with the Cedar policy statement:
-
-```bash
-cat > /tmp/cedar-policy.json << EOF
-{
-  "cedar": {
-    "statement": "permit(principal is AgentCore::OAuthUser, action in [AgentCore::Action::\"mcp-server-target___add_numbers\", AgentCore::Action::\"mcp-server-target___greet_user\"], resource == AgentCore::Gateway::\"${GATEWAY_ARN}\");"
-  }
-}
-EOF
-```
-
-Then create the policy:
-
-```bash
-pulumi env run aws-bedrock-workshop/dev -- aws bedrock-agentcore-control create-policy \
-  --policy-engine-id $POLICY_ENGINE_ID \
-  --name allow_add_and_greet \
-  --description "Allow add_numbers and greet_user only - deny multiply_numbers" \
-  --definition "file:///tmp/cedar-policy.json" \
-  --region us-east-1
-```
-
-This Cedar policy reads: "Allow any authenticated OAuth user to call `add_numbers` and `greet_user` on this specific Gateway." Since Cedar is default-deny, `multiply_numbers` is implicitly blocked.
-
-### Step 11: Attach the Policy Engine to the Gateway
-
-Attach the policy engine to your Gateway in `ENFORCE` mode:
-
-```bash
-export GATEWAY_ID=$(pulumi stack output gatewayId)
-export POLICY_ENGINE_ARN=<paste policyEngineArn from step 10>
-
-pulumi env run aws-bedrock-workshop/dev -- python3 -c "
 import boto3
-client = boto3.client('bedrock-agentcore-control', region_name='us-east-1')
-client.update_gateway(
-    gatewayIdentifier='${GATEWAY_ID}',
-    name='$(pulumi stack output gatewayId | sed "s/-[^-]*$//")',
-    roleArn='$(pulumi stack output agentExecutionRoleArn)',
-    protocolType='MCP',
-    authorizerType='CUSTOM_JWT',
-    authorizerConfiguration={
-        'customJWTAuthorizer': {
-            'discoveryUrl': '$(pulumi stack output cognitoDiscoveryUrl)',
-            'allowedClients': ['$(pulumi stack output cognitoUserPoolClientId)']
-        }
+
+
+def _find_policy_engine_by_name(client, name: str):
+  next_token = None
+  while True:
+    kwargs = {"maxResults": 100}
+    if next_token:
+      kwargs["nextToken"] = next_token
+    response = client.list_policy_engines(**kwargs)
+    for item in response.get("items", []):
+      if item.get("name") == name:
+        return item
+    next_token = response.get("nextToken")
+    if not next_token:
+      return None
+
+
+def _find_policy_by_name(client, policy_engine_id: str, name: str):
+  next_token = None
+  while True:
+    kwargs = {"policyEngineId": policy_engine_id, "maxResults": 100}
+    if next_token:
+      kwargs["nextToken"] = next_token
+    response = client.list_policies(**kwargs)
+    for item in response.get("items", []):
+      if item.get("name") == name:
+        return item
+    next_token = response.get("nextToken")
+    if not next_token:
+      return None
+
+
+def _wait_for_engine_active(client, policy_engine_id: str, timeout: int = 90):
+  deadline = time.time() + timeout
+  while time.time() < deadline:
+    response = client.get_policy_engine(policyEngineId=policy_engine_id)
+    status = response.get("status")
+    if status == "ACTIVE":
+      return
+    if status in ("FAILED", "DELETING", "DELETED"):
+      raise RuntimeError(f"Policy engine entered unexpected status: {status}")
+    time.sleep(5)
+  raise TimeoutError(f"Policy engine did not become ACTIVE within {timeout}s")
+
+
+def _build_cedar_statement(gateway_arn: str, target_name: str) -> str:
+  return (
+    f'permit(principal is AgentCore::OAuthUser, '
+    f'action in [AgentCore::Action::"{target_name}___add_numbers", '
+    f'AgentCore::Action::"{target_name}___greet_user"], '
+    f'resource == AgentCore::Gateway::"{gateway_arn}");'
+  )
+
+
+def _base_gateway_kwargs(gateway_id, gateway_name, gateway_role_arn, discovery_url, allowed_clients):
+  return {
+    "gatewayIdentifier": gateway_id,
+    "name": gateway_name,
+    "roleArn": gateway_role_arn,
+    "protocolType": "MCP",
+    "authorizerType": "CUSTOM_JWT",
+    "authorizerConfiguration": {
+      "customJWTAuthorizer": {
+        "discoveryUrl": discovery_url,
+        "allowedClients": [c.strip() for c in allowed_clients.split(",")],
+        "allowedScopes": ["aws.cognito.signin.user.admin"],
+      }
     },
-    policyEngineConfiguration={
-        'arn': '${POLICY_ENGINE_ARN}',
-        'mode': 'ENFORCE'
-    }
-)
-print('Policy engine attached in ENFORCE mode')
-"
+  }
+
+
+def _upsert(client, gateway_id, gateway_name, gateway_role_arn, discovery_url, allowed_clients,
+      target_name, gateway_arn, engine_name, policy_name, engine_description, policy_description):
+  statement = _build_cedar_statement(gateway_arn, target_name)
+
+  engine = _find_policy_engine_by_name(client, engine_name)
+  if engine:
+    engine_id = engine["policyEngineId"]
+    engine_arn = engine["policyEngineArn"]
+  else:
+    created = client.create_policy_engine(
+      name=engine_name,
+      description=engine_description,
+      clientToken=str(uuid.uuid4()),
+    )
+    engine_id = created["policyEngineId"]
+    engine_arn = created["policyEngineArn"]
+
+  _wait_for_engine_active(client, engine_id)
+
+  policy = _find_policy_by_name(client, engine_id, policy_name)
+  if policy:
+    current_stmt = policy.get("definition", {}).get("cedar", {}).get("statement")
+    if current_stmt != statement or policy.get("description") != policy_description:
+      client.update_policy(
+        policyEngineId=engine_id,
+        policyId=policy["policyId"],
+        name=policy_name,
+        description=policy_description,
+        definition={"cedar": {"statement": statement}},
+      )
+  else:
+    client.create_policy(
+      policyEngineId=engine_id,
+      name=policy_name,
+      description=policy_description,
+      clientToken=str(uuid.uuid4()),
+      definition={"cedar": {"statement": statement}},
+    )
+
+  kwargs = _base_gateway_kwargs(
+    gateway_id, gateway_name, gateway_role_arn, discovery_url, allowed_clients
+  )
+  kwargs["policyEngineConfiguration"] = {"arn": engine_arn, "mode": "ENFORCE"}
+  client.update_gateway(**kwargs)
+  print(engine_id)
+
+
+def _delete(client, gateway_id, gateway_name, gateway_role_arn, discovery_url, allowed_clients,
+      engine_name, policy_name):
+  engine = _find_policy_engine_by_name(client, engine_name)
+  if not engine:
+    print("")
+    return
+
+  engine_id = engine["policyEngineId"]
+
+  # Detach policy engine from gateway by updating gateway without policyEngineConfiguration
+  client.update_gateway(
+    **_base_gateway_kwargs(gateway_id, gateway_name, gateway_role_arn, discovery_url, allowed_clients)
+  )
+
+  policy = _find_policy_by_name(client, engine_id, policy_name)
+  if policy:
+    client.delete_policy(policyEngineId=engine_id, policyId=policy["policyId"])
+
+  client.delete_policy_engine(policyEngineId=engine_id)
+  print(engine_id)
+
+
+def main():
+  parser = argparse.ArgumentParser(description="Manage Cedar policy enforcement for AgentCore Gateway")
+  parser.add_argument("--mode", choices=["upsert", "delete"], required=True)
+  parser.add_argument("--region", required=True)
+  parser.add_argument("--gateway-id", required=True)
+  parser.add_argument("--gateway-name", required=True)
+  parser.add_argument("--gateway-role-arn", required=True)
+  parser.add_argument("--discovery-url", required=True)
+  parser.add_argument("--allowed-clients", required=True)
+  parser.add_argument("--target-name", required=True)
+  parser.add_argument("--gateway-arn", default="")
+  parser.add_argument("--engine-name", required=True)
+  parser.add_argument("--policy-name", required=True)
+  parser.add_argument("--engine-description", default="")
+  parser.add_argument("--policy-description", default="")
+  args = parser.parse_args()
+
+  client = boto3.client("bedrock-agentcore-control", region_name=args.region)
+  if args.mode == "upsert":
+    if not args.gateway_arn:
+      raise ValueError("--gateway-arn is required in upsert mode")
+    _upsert(
+      client,
+      args.gateway_id,
+      args.gateway_name,
+      args.gateway_role_arn,
+      args.discovery_url,
+      args.allowed_clients,
+      args.target_name,
+      args.gateway_arn,
+      args.engine_name,
+      args.policy_name,
+      args.engine_description,
+      args.policy_description,
+    )
+  else:
+    _delete(
+      client,
+      args.gateway_id,
+      args.gateway_name,
+      args.gateway_role_arn,
+      args.discovery_url,
+      args.allowed_clients,
+      args.engine_name,
+      args.policy_name,
+    )
+
+
+if __name__ == "__main__":
+  try:
+    main()
+  except Exception as exc:
+    print(f"ERROR: {exc}", file=sys.stderr)
+    raise
 ```
 
-Wait about 15 seconds for the Gateway to update.
+### Step 10: Wire Cedar policy management into Pulumi
+
+Add a command provider resource after your gateway target so `pulumi up` creates/updates the policy engine + policy and attaches it to the gateway.
+
+<div class="lang-tabs" markdown="1">
+
+<div class="lang-tab" data-lang="typescript" markdown="1">
+
+```typescript
+const cedarEngineName = `${stackName}-policy-engine`;
+const cedarPolicyName = `${stackName}-cedar-policy`;
+const cedarPolicyScript = path.resolve(__dirname, "scripts/manage_cedar_policy.py");
+
+const cedarDiscoveryUrl = pulumi
+  .all([currentRegion, mcpUserPool.id])
+  .apply(
+  ([region, userPoolId]) =>
+    `https://cognito-idp.${region.region}.amazonaws.com/${userPoolId}/.well-known/openid-configuration`,
+  );
+
+const cedarPolicy = new command.local.Command(
+  "cedar_policy",
+  {
+  create: pulumi.interpolate`python3 ${cedarPolicyScript} --mode upsert --region ${awsRegion} --gateway-id ${mcpGateway.gatewayId} --gateway-name ${stackName}-mcp-gateway --gateway-role-arn ${agentExecution.arn} --discovery-url ${cedarDiscoveryUrl} --allowed-clients ${mcpClient.id} --target-name ${mcpGatewayTargetName} --gateway-arn ${mcpGateway.gatewayArn} --engine-name ${cedarEngineName} --policy-name ${cedarPolicyName} --engine-description 'Cedar policy engine for ${stackName}' --policy-description 'Allow add_numbers and greet_user; deny multiply_numbers'`,
+  update: pulumi.interpolate`python3 ${cedarPolicyScript} --mode upsert --region ${awsRegion} --gateway-id ${mcpGateway.gatewayId} --gateway-name ${stackName}-mcp-gateway --gateway-role-arn ${agentExecution.arn} --discovery-url ${cedarDiscoveryUrl} --allowed-clients ${mcpClient.id} --target-name ${mcpGatewayTargetName} --gateway-arn ${mcpGateway.gatewayArn} --engine-name ${cedarEngineName} --policy-name ${cedarPolicyName} --engine-description 'Cedar policy engine for ${stackName}' --policy-description 'Allow add_numbers and greet_user; deny multiply_numbers'`,
+  delete: pulumi.interpolate`python3 ${cedarPolicyScript} --mode delete --region ${awsRegion} --gateway-id ${mcpGateway.gatewayId} --gateway-name ${stackName}-mcp-gateway --gateway-role-arn ${agentExecution.arn} --discovery-url ${cedarDiscoveryUrl} --allowed-clients ${mcpClient.id} --engine-name ${cedarEngineName} --policy-name ${cedarPolicyName}`,
+  triggers: [
+    mcpGateway.gatewayId,
+    mcpGateway.gatewayArn,
+    mcpGatewayTargetName,
+    cedarEngineName,
+    cedarPolicyName,
+    awsRegion,
+  ],
+  },
+  { dependsOn: [mcpGatewayTarget] },
+);
+
+const policyEngineIdOutput = cedarPolicy.stdout.apply((s) => s.trim());
+```
+
+</div>
+
+<div class="lang-tab" data-lang="python" markdown="1">
+
+```python
+cedar_engine_name = f"{stack_name}-policy-engine"
+cedar_policy_name = f"{stack_name}-cedar-policy"
+cedar_policy_script = os.path.join(
+  os.path.dirname(__file__), "scripts", "manage_cedar_policy.py"
+)
+
+cedar_discovery_url = pulumi.Output.all(current_region, mcp_user_pool.id).apply(
+  lambda args: f"https://cognito-idp.{args[0].region}.amazonaws.com/{args[1]}/.well-known/openid-configuration"
+)
+
+cedar_policy = command.local.Command(
+  "cedar_policy",
+  create=pulumi.Output.all(
+    aws_region,
+    mcp_gateway.gateway_id,
+    agent_execution.arn,
+    cedar_discovery_url,
+    mcp_client.id,
+    mcp_gateway.gateway_arn,
+  ).apply(
+    lambda args: (
+      f"python3 {cedar_policy_script} --mode upsert --region {args[0]} "
+      f"--gateway-id {args[1]} --gateway-name {stack_name}-mcp-gateway "
+      f"--gateway-role-arn {args[2]} --discovery-url {args[3]} "
+      f"--allowed-clients {args[4]} --target-name {mcp_gateway_target_name} "
+      f"--gateway-arn {args[5]} --engine-name {cedar_engine_name} "
+      f"--policy-name {cedar_policy_name} "
+      f"--engine-description 'Cedar policy engine for {stack_name}' "
+      f"--policy-description 'Allow add_numbers and greet_user; deny multiply_numbers'"
+    )
+  ),
+  update=pulumi.Output.all(
+    aws_region,
+    mcp_gateway.gateway_id,
+    agent_execution.arn,
+    cedar_discovery_url,
+    mcp_client.id,
+    mcp_gateway.gateway_arn,
+  ).apply(
+    lambda args: (
+      f"python3 {cedar_policy_script} --mode upsert --region {args[0]} "
+      f"--gateway-id {args[1]} --gateway-name {stack_name}-mcp-gateway "
+      f"--gateway-role-arn {args[2]} --discovery-url {args[3]} "
+      f"--allowed-clients {args[4]} --target-name {mcp_gateway_target_name} "
+      f"--gateway-arn {args[5]} --engine-name {cedar_engine_name} "
+      f"--policy-name {cedar_policy_name} "
+      f"--engine-description 'Cedar policy engine for {stack_name}' "
+      f"--policy-description 'Allow add_numbers and greet_user; deny multiply_numbers'"
+    )
+  ),
+  delete=pulumi.Output.all(
+    aws_region,
+    mcp_gateway.gateway_id,
+    agent_execution.arn,
+    cedar_discovery_url,
+    mcp_client.id,
+  ).apply(
+    lambda args: (
+      f"python3 {cedar_policy_script} --mode delete --region {args[0]} "
+      f"--gateway-id {args[1]} --gateway-name {stack_name}-mcp-gateway "
+      f"--gateway-role-arn {args[2]} --discovery-url {args[3]} "
+      f"--allowed-clients {args[4]} --engine-name {cedar_engine_name} "
+      f"--policy-name {cedar_policy_name}"
+    )
+  ),
+  triggers=[
+    mcp_gateway.gateway_id,
+    mcp_gateway.gateway_arn,
+    mcp_gateway_target_name,
+    cedar_engine_name,
+    cedar_policy_name,
+    aws_region,
+  ],
+  opts=pulumi.ResourceOptions(depends_on=[mcp_gateway_target]),
+)
+
+policy_engine_id_output = cedar_policy.stdout.apply(lambda s: s.strip())
+```
+
+</div>
+
+</div>
+
+Export the engine ID:
+
+<div class="lang-tabs" markdown="1">
+
+<div class="lang-tab" data-lang="typescript" markdown="1">
+
+```typescript
+export const policyEngineId = policyEngineIdOutput;
+```
+
+</div>
+
+<div class="lang-tab" data-lang="python" markdown="1">
+
+```python
+pulumi.export("policyEngineId", policy_engine_id_output)
+```
+
+</div>
+
+</div>
+
+### Step 11: Deploy and confirm policy engine creation
+
+Deploy as usual:
+
+```bash
+pulumi up
+```
+
+Confirm the policy engine ID output:
+
+```bash
+pulumi stack output policyEngineId
+```
 
 ### Step 12: Test policy enforcement
 
@@ -2384,31 +2980,21 @@ export JWT_TOKEN="<get a fresh token>"
 python test_mcp_server.py $GATEWAY_URL $JWT_TOKEN
 ```
 
-This time, `add_numbers` and `greet_user` work as before, but `multiply_numbers` returns:
-
-```text
-Tool Execution Denied: Tool call not allowed due to policy enforcement
-[No policy applies to the request (denied by default).]
-```
+This time, `add_numbers` and `greet_user` will be listed and work as before, but `multiply_numbers` is not listed and the attempt to use it throws an error.
 
 That's Cedar in action - default-deny blocks any tool not explicitly permitted.
 
 ### Clean up Cedar resources
 
-When you're done experimenting, remove the policy engine from the Gateway and delete the resources:
+With the command-provider setup, cleanup is handled automatically by Pulumi:
 
 ```bash
-# Detach policy engine (re-run the update_gateway without policyEngineConfiguration)
-# Delete policy, then policy engine
-pulumi env run aws-bedrock-workshop/dev -- aws bedrock-agentcore-control delete-policy \
-  --policy-engine-id $POLICY_ENGINE_ID \
-  --policy-id <YOUR_POLICY_ID> \
-  --region us-east-1
-
-pulumi env run aws-bedrock-workshop/dev -- aws bedrock-agentcore-control delete-policy-engine \
-  --policy-engine-id $POLICY_ENGINE_ID \
-  --region us-east-1
+# Removes the command resource, which detaches the engine from the gateway,
+# deletes the policy, and then deletes the policy engine.
+pulumi destroy
 ```
+
+If you keep the stack but want to temporarily disable Cedar enforcement, remove the `cedar_policy` command resource from your program and run `pulumi up`.
 
 ## What you learned
 
@@ -2419,6 +3005,6 @@ pulumi env run aws-bedrock-workshop/dev -- aws bedrock-agentcore-control delete-
 - Cognito provides JWT tokens; the Gateway validates them before any request reaches your MCP server code
 - Pulumi secrets encrypt sensitive config values like passwords - they're masked in output and encrypted in state
 - [Cedar](https://www.cedarpolicy.com/) policies use a default-deny model: everything is blocked unless explicitly permitted
-- The Policy Engine workflow is: create engine, add policies, attach to Gateway in ENFORCE mode
+- The Policy Engine workflow (create engine, manage policies, attach in ENFORCE mode, and cleanup) is automated in Pulumi through command provider resources and helper scripts
 
 Next up: [Module 3 - Multi-agent orchestration](03-multi-agent-orchestration.md)
