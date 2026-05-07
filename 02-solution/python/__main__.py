@@ -797,10 +797,15 @@ runtime_invocation_endpoint = pulumi.Output.all(
     )
 )
 
-_GATEWAY_TARGET_CREATE_SCRIPT = r"""python3 <<'PYEOF'
+_GATEWAY_TARGET_UPSERT_SCRIPT = r"""python3 <<'PYEOF'
 import boto3, os, sys, time
 client = boto3.client('bedrock-agentcore-control', region_name=os.environ['REGION'])
 target_id = None
+target_configuration = {'mcp': {'mcpServer': {'endpoint': os.environ['ENDPOINT']}}}
+credential_provider_configurations = [{
+    'credentialProviderType': 'GATEWAY_IAM_ROLE',
+    'credentialProvider': {'iamCredentialProvider': {'service': 'bedrock-agentcore'}},
+}]
 for t in client.list_gateway_targets(gatewayIdentifier=os.environ['GATEWAY_ID']).get('items', []):
     if t['name'] == os.environ['TARGET_NAME']:
         target_id = t['targetId']
@@ -810,15 +815,34 @@ if target_id is None:
         gatewayIdentifier=os.environ['GATEWAY_ID'],
         name=os.environ['TARGET_NAME'],
         description='Target for AgentCore-hosted MCP server',
-        targetConfiguration={'mcp': {'mcpServer': {'endpoint': os.environ['ENDPOINT']}}},
-        credentialProviderConfigurations=[{
-            'credentialProviderType': 'GATEWAY_IAM_ROLE',
-            'credentialProvider': {'iamCredentialProvider': {'service': 'bedrock-agentcore'}},
-        }],
+        targetConfiguration=target_configuration,
+        credentialProviderConfigurations=credential_provider_configurations,
     )
     target_id = r['targetId']
+else:
+    client.update_gateway_target(
+        gatewayIdentifier=os.environ['GATEWAY_ID'],
+        targetId=target_id,
+        name=os.environ['TARGET_NAME'],
+        description='Target for AgentCore-hosted MCP server',
+        targetConfiguration=target_configuration,
+        credentialProviderConfigurations=credential_provider_configurations,
+    )
 # Wait for READY so the policy engine knows the tool actions before any
 # Cedar policy referencing them is created.
+for _ in range(60):
+    g = client.get_gateway_target(gatewayIdentifier=os.environ['GATEWAY_ID'], targetId=target_id)
+    status = g.get('status')
+    if status == 'READY':
+        break
+    if status in ('FAILED', 'DELETING'):
+        sys.stderr.write(f'target failed: status={status} reasons={g.get("statusReasons")}\n')
+        sys.exit(1)
+    time.sleep(5)
+client.synchronize_gateway_targets(
+    gatewayIdentifier=os.environ['GATEWAY_ID'],
+    targetIdList=[target_id],
+)
 for _ in range(60):
     g = client.get_gateway_target(gatewayIdentifier=os.environ['GATEWAY_ID'], targetId=target_id)
     status = g.get('status')
@@ -848,8 +872,9 @@ PYEOF
 
 mcp_gateway_target = command.local.Command(
     "mcp_gateway_target",
-    create=_GATEWAY_TARGET_CREATE_SCRIPT,
+    create=_GATEWAY_TARGET_UPSERT_SCRIPT,
     delete=_GATEWAY_TARGET_DELETE_SCRIPT,
+    update=_GATEWAY_TARGET_UPSERT_SCRIPT,
     environment={
         "REGION": current_region.apply(lambda r: r.region),
         "GATEWAY_ID": mcp_gateway.gateway_identifier,
@@ -859,6 +884,7 @@ mcp_gateway_target = command.local.Command(
     triggers=[
         mcp_gateway.gateway_identifier,
         runtime_invocation_endpoint,
+        image_tag,
     ],
 )
 

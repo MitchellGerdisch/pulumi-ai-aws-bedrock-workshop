@@ -136,7 +136,7 @@ Set your unique stack name and store the test password in the shared ESC environ
 
 ```bash
 pulumi config set stackName agentcore-mcp-<id>
-pulumi env set aws-bedrock-workshop/dev 'pulumiConfig.mcp-server-agentcore-runtime:testPassword' 'TestPassword123' --secret
+pulumi env set aws-bedrock-workshop/dev 'pulumiConfig.mcp-server:testPassword' 'TestPassword123' --secret
 ```
 
 ## Step 2: Write the MCP server
@@ -353,6 +353,9 @@ Now the infrastructure file. We'll build it step by step. Each section adds reso
 ```typescript
 import * as pulumi from "@pulumi/pulumi";
 import * as aws from "@pulumi/aws";
+import * as awsNative from "@pulumi/aws-native";
+import * as command from "@pulumi/command";
+import * as time from "@pulumiverse/time";
 import { createHash } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
@@ -385,14 +388,17 @@ const currentRegion = aws.getRegionOutput({});
 import hashlib
 import json
 import os
+import urllib.parse
 
 import pulumi
 import pulumi_aws as aws
+import pulumi_aws_native as aws_native
+import pulumi_command as command
+import pulumiverse_time as time
 
 config = pulumi.Config()
 agent_name = config.get("agentName") or "MCPServerAgent"
 network_mode = config.get("networkMode") or "PUBLIC"
-image_tag = config.get("imageTag") or "latest"
 stack_name = config.get("stackName") or "agentcore-mcp-server"
 description = (
     config.get("description")
@@ -2165,10 +2171,15 @@ runtime_invocation_endpoint = pulumi.Output.all(
     )
 )
 
-_GATEWAY_TARGET_CREATE_SCRIPT = r"""python3 <<'PYEOF'
+_GATEWAY_TARGET_UPSERT_SCRIPT = r"""python3 <<'PYEOF'
 import boto3, os, sys, time
 client = boto3.client('bedrock-agentcore-control', region_name=os.environ['REGION'])
 target_id = None
+target_configuration = {'mcp': {'mcpServer': {'endpoint': os.environ['ENDPOINT']}}}
+credential_provider_configurations = [{
+  'credentialProviderType': 'GATEWAY_IAM_ROLE',
+  'credentialProvider': {'iamCredentialProvider': {'service': 'bedrock-agentcore'}},
+}]
 for t in client.list_gateway_targets(gatewayIdentifier=os.environ['GATEWAY_ID']).get('items', []):
     if t['name'] == os.environ['TARGET_NAME']:
         target_id = t['targetId']
@@ -2178,13 +2189,19 @@ if target_id is None:
         gatewayIdentifier=os.environ['GATEWAY_ID'],
         name=os.environ['TARGET_NAME'],
         description='Target for AgentCore-hosted MCP server',
-        targetConfiguration={'mcp': {'mcpServer': {'endpoint': os.environ['ENDPOINT']}}},
-        credentialProviderConfigurations=[{
-            'credentialProviderType': 'GATEWAY_IAM_ROLE',
-            'credentialProvider': {'iamCredentialProvider': {'service': 'bedrock-agentcore'}},
-        }],
+        targetConfiguration=target_configuration,
+        credentialProviderConfigurations=credential_provider_configurations,
     )
     target_id = r['targetId']
+    else:
+      client.update_gateway_target(
+        gatewayIdentifier=os.environ['GATEWAY_ID'],
+        targetId=target_id,
+        name=os.environ['TARGET_NAME'],
+        description='Target for AgentCore-hosted MCP server',
+        targetConfiguration=target_configuration,
+        credentialProviderConfigurations=credential_provider_configurations,
+      )
 for _ in range(60):
     g = client.get_gateway_target(gatewayIdentifier=os.environ['GATEWAY_ID'], targetId=target_id)
     status = g.get('status')
@@ -2193,6 +2210,19 @@ for _ in range(60):
     if status in ('FAILED', 'DELETING'):
         sys.stderr.write(f'target failed: status={status} reasons={g.get("statusReasons")}\n')
         sys.exit(1)
+    time.sleep(5)
+  client.synchronize_gateway_targets(
+    gatewayIdentifier=os.environ['GATEWAY_ID'],
+    targetIdList=[target_id],
+  )
+  for _ in range(60):
+    g = client.get_gateway_target(gatewayIdentifier=os.environ['GATEWAY_ID'], targetId=target_id)
+    status = g.get('status')
+    if status == 'READY':
+      break
+    if status in ('FAILED', 'DELETING'):
+      sys.stderr.write(f'target failed: status={status} reasons={g.get("statusReasons")}\n')
+      sys.exit(1)
     time.sleep(5)
 print(target_id)
 PYEOF
@@ -2214,8 +2244,9 @@ PYEOF
 
 mcp_gateway_target = command.local.Command(
     "mcp_gateway_target",
-    create=_GATEWAY_TARGET_CREATE_SCRIPT,
+  create=_GATEWAY_TARGET_UPSERT_SCRIPT,
     delete=_GATEWAY_TARGET_DELETE_SCRIPT,
+  update=_GATEWAY_TARGET_UPSERT_SCRIPT,
     environment={
         "REGION": current_region.apply(lambda r: r.region),
         "GATEWAY_ID": mcp_gateway.gateway_identifier,
@@ -2225,6 +2256,7 @@ mcp_gateway_target = command.local.Command(
     triggers=[
         mcp_gateway.gateway_identifier,
         runtime_invocation_endpoint,
+      image_tag,
     ],
 )
 

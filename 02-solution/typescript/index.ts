@@ -812,10 +812,15 @@ const runtimeInvocationEndpoint = pulumi
       `https://bedrock-agentcore.${region.region}.amazonaws.com/runtimes/${encodeURIComponent(arn)}/invocations?qualifier=DEFAULT`,
   );
 
-const gatewayTargetCreateScript = `python3 <<'PYEOF'
+const gatewayTargetUpsertScript = `python3 <<'PYEOF'
 import boto3, os, sys, time
 client = boto3.client('bedrock-agentcore-control', region_name=os.environ['REGION'])
 target_id = None
+target_configuration = {'mcp': {'mcpServer': {'endpoint': os.environ['ENDPOINT']}}}
+credential_provider_configurations = [{
+  'credentialProviderType': 'GATEWAY_IAM_ROLE',
+  'credentialProvider': {'iamCredentialProvider': {'service': 'bedrock-agentcore'}},
+}]
 for t in client.list_gateway_targets(gatewayIdentifier=os.environ['GATEWAY_ID']).get('items', []):
     if t['name'] == os.environ['TARGET_NAME']:
         target_id = t['targetId']
@@ -825,13 +830,19 @@ if target_id is None:
         gatewayIdentifier=os.environ['GATEWAY_ID'],
         name=os.environ['TARGET_NAME'],
         description='Target for AgentCore-hosted MCP server',
-        targetConfiguration={'mcp': {'mcpServer': {'endpoint': os.environ['ENDPOINT']}}},
-        credentialProviderConfigurations=[{
-            'credentialProviderType': 'GATEWAY_IAM_ROLE',
-            'credentialProvider': {'iamCredentialProvider': {'service': 'bedrock-agentcore'}},
-        }],
+        targetConfiguration=target_configuration,
+        credentialProviderConfigurations=credential_provider_configurations,
     )
     target_id = r['targetId']
+    else:
+      client.update_gateway_target(
+        gatewayIdentifier=os.environ['GATEWAY_ID'],
+        targetId=target_id,
+        name=os.environ['TARGET_NAME'],
+        description='Target for AgentCore-hosted MCP server',
+        targetConfiguration=target_configuration,
+        credentialProviderConfigurations=credential_provider_configurations,
+      )
 # Wait for READY so the policy engine knows the tool actions before any
 # Cedar policy referencing them is created.
 for _ in range(60):
@@ -842,6 +853,19 @@ for _ in range(60):
     if status in ('FAILED', 'DELETING'):
         sys.stderr.write(f'target failed: status={status} reasons={g.get("statusReasons")}\\n')
         sys.exit(1)
+    time.sleep(5)
+  client.synchronize_gateway_targets(
+    gatewayIdentifier=os.environ['GATEWAY_ID'],
+    targetIdList=[target_id],
+  )
+  for _ in range(60):
+    g = client.get_gateway_target(gatewayIdentifier=os.environ['GATEWAY_ID'], targetId=target_id)
+    status = g.get('status')
+    if status == 'READY':
+      break
+    if status in ('FAILED', 'DELETING'):
+      sys.stderr.write(f'target failed: status={status} reasons={g.get("statusReasons")}\\n')
+      sys.exit(1)
     time.sleep(5)
 print(target_id)
 PYEOF
@@ -862,15 +886,16 @@ PYEOF
 `;
 
 const mcpGatewayTarget = new command.local.Command("mcp_gateway_target", {
-  create: gatewayTargetCreateScript,
+  create: gatewayTargetUpsertScript,
   delete: gatewayTargetDeleteScript,
+  update: gatewayTargetUpsertScript,
   environment: {
     REGION: currentRegion.apply((r) => r.region),
     GATEWAY_ID: mcpGateway.gatewayIdentifier,
     TARGET_NAME: mcpTargetName,
     ENDPOINT: runtimeInvocationEndpoint,
   },
-  triggers: [mcpGateway.gatewayIdentifier, runtimeInvocationEndpoint],
+  triggers: [mcpGateway.gatewayIdentifier, runtimeInvocationEndpoint, imageTag],
 });
 
 const mcpGatewayTargetId = mcpGatewayTarget.stdout.apply((s) => s.trim());
