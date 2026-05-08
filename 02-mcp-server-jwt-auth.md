@@ -399,6 +399,7 @@ import pulumiverse_time as time
 config = pulumi.Config()
 agent_name = config.get("agentName") or "MCPServerAgent"
 network_mode = config.get("networkMode") or "PUBLIC"
+image_tag = config.get("imageTag") or "latest"
 stack_name = config.get("stackName") or "agentcore-mcp-server"
 description = (
     config.get("description")
@@ -2093,19 +2094,27 @@ const runtimeInvocationEndpoint = pulumi
       `https://bedrock-agentcore.${region.region}.amazonaws.com/runtimes/${encodeURIComponent(arn)}/invocations?qualifier=DEFAULT`,
   );
 
-const gatewayTargetCreateScript = `python3 <<'PYEOF'
-import boto3, os, sys, time
+const gatewayTargetUpsertScript = `python3 <<'PYEOF'
+import boto3, hashlib, os, sys, time
 client = boto3.client('bedrock-agentcore-control', region_name=os.environ['REGION'])
 target_id = None
+existing_endpoint = None
+existing_description = None
+source_stamp = hashlib.sha1(os.environ['SOURCE_VERSION'].encode()).hexdigest()[:10]
+description = f'Target for AgentCore-hosted MCP server [{source_stamp}]'
 for t in client.list_gateway_targets(gatewayIdentifier=os.environ['GATEWAY_ID']).get('items', []):
     if t['name'] == os.environ['TARGET_NAME']:
         target_id = t['targetId']
+        existing_endpoint = (
+            t.get('targetConfiguration', {}).get('mcp', {}).get('mcpServer', {}).get('endpoint')
+        )
+        existing_description = t.get('description')
         break
 if target_id is None:
     r = client.create_gateway_target(
         gatewayIdentifier=os.environ['GATEWAY_ID'],
         name=os.environ['TARGET_NAME'],
-        description='Target for AgentCore-hosted MCP server',
+        description=description,
         targetConfiguration={'mcp': {'mcpServer': {'endpoint': os.environ['ENDPOINT']}}},
         credentialProviderConfigurations=[{
             'credentialProviderType': 'GATEWAY_IAM_ROLE',
@@ -2113,6 +2122,18 @@ if target_id is None:
         }],
     )
     target_id = r['targetId']
+elif existing_endpoint != os.environ['ENDPOINT'] or existing_description != description:
+    client.update_gateway_target(
+        gatewayIdentifier=os.environ['GATEWAY_ID'],
+        targetId=target_id,
+        name=os.environ['TARGET_NAME'],
+        description=description,
+        targetConfiguration={'mcp': {'mcpServer': {'endpoint': os.environ['ENDPOINT']}}},
+        credentialProviderConfigurations=[{
+            'credentialProviderType': 'GATEWAY_IAM_ROLE',
+            'credentialProvider': {'iamCredentialProvider': {'service': 'bedrock-agentcore'}},
+        }],
+    )
 for _ in range(60):
     g = client.get_gateway_target(gatewayIdentifier=os.environ['GATEWAY_ID'], targetId=target_id)
     status = g.get('status')
@@ -2127,29 +2148,34 @@ PYEOF
 `;
 
 const gatewayTargetDeleteScript = `python3 <<'PYEOF'
-import boto3, os
+import boto3, hashlib, os
 client = boto3.client('bedrock-agentcore-control', region_name=os.environ['REGION'])
+source_stamp = hashlib.sha1(os.environ['SOURCE_VERSION'].encode()).hexdigest()[:10]
+expected_description = f'Target for AgentCore-hosted MCP server [{source_stamp}]'
 try:
     targets = client.list_gateway_targets(gatewayIdentifier=os.environ['GATEWAY_ID']).get('items', [])
 except client.exceptions.ResourceNotFoundException:
     targets = []
 for t in targets:
-    if t['name'] == os.environ['TARGET_NAME']:
+    if t['name'] == os.environ['TARGET_NAME'] and t.get('description') == expected_description:
         client.delete_gateway_target(gatewayIdentifier=os.environ['GATEWAY_ID'], targetId=t['targetId'])
         break
 PYEOF
 `;
 
 const mcpGatewayTarget = new command.local.Command("mcp_gateway_target", {
-  create: gatewayTargetCreateScript,
+  create: gatewayTargetUpsertScript,
+  update: gatewayTargetUpsertScript,
   delete: gatewayTargetDeleteScript,
   environment: {
     REGION: currentRegion.apply((r) => r.region),
     GATEWAY_ID: mcpGateway.gatewayIdentifier,
     TARGET_NAME: mcpTargetName,
     ENDPOINT: runtimeInvocationEndpoint,
+    // Include the source version so that when MCP code changes, Pulumi runs
+    // the update script (not a replace) so the delete path is never triggered.
+    SOURCE_VERSION: agentSourceObject.versionId.apply((v) => v ?? "initial"),
   },
-  triggers: [mcpGateway.gatewayIdentifier, runtimeInvocationEndpoint],
 });
 
 const mcpGatewayTargetId = mcpGatewayTarget.stdout.apply((s) => s.trim());
@@ -2172,36 +2198,45 @@ runtime_invocation_endpoint = pulumi.Output.all(
 )
 
 _GATEWAY_TARGET_UPSERT_SCRIPT = r"""python3 <<'PYEOF'
-import boto3, os, sys, time
+import boto3, hashlib, os, sys, time
 client = boto3.client('bedrock-agentcore-control', region_name=os.environ['REGION'])
 target_id = None
-target_configuration = {'mcp': {'mcpServer': {'endpoint': os.environ['ENDPOINT']}}}
-credential_provider_configurations = [{
-  'credentialProviderType': 'GATEWAY_IAM_ROLE',
-  'credentialProvider': {'iamCredentialProvider': {'service': 'bedrock-agentcore'}},
-}]
+existing_endpoint = None
+existing_description = None
+source_stamp = hashlib.sha1(os.environ['SOURCE_VERSION'].encode()).hexdigest()[:10]
+description = f'Target for AgentCore-hosted MCP server [{source_stamp}]'
 for t in client.list_gateway_targets(gatewayIdentifier=os.environ['GATEWAY_ID']).get('items', []):
     if t['name'] == os.environ['TARGET_NAME']:
         target_id = t['targetId']
+        existing_endpoint = (
+            t.get('targetConfiguration', {}).get('mcp', {}).get('mcpServer', {}).get('endpoint')
+        )
+        existing_description = t.get('description')
         break
 if target_id is None:
     r = client.create_gateway_target(
         gatewayIdentifier=os.environ['GATEWAY_ID'],
         name=os.environ['TARGET_NAME'],
-        description='Target for AgentCore-hosted MCP server',
-        targetConfiguration=target_configuration,
-        credentialProviderConfigurations=credential_provider_configurations,
+        description=description,
+        targetConfiguration={'mcp': {'mcpServer': {'endpoint': os.environ['ENDPOINT']}}},
+        credentialProviderConfigurations=[{
+            'credentialProviderType': 'GATEWAY_IAM_ROLE',
+            'credentialProvider': {'iamCredentialProvider': {'service': 'bedrock-agentcore'}},
+        }],
     )
     target_id = r['targetId']
-    else:
-      client.update_gateway_target(
+elif existing_endpoint != os.environ['ENDPOINT'] or existing_description != description:
+    client.update_gateway_target(
         gatewayIdentifier=os.environ['GATEWAY_ID'],
         targetId=target_id,
         name=os.environ['TARGET_NAME'],
-        description='Target for AgentCore-hosted MCP server',
-        targetConfiguration=target_configuration,
-        credentialProviderConfigurations=credential_provider_configurations,
-      )
+        description=description,
+        targetConfiguration={'mcp': {'mcpServer': {'endpoint': os.environ['ENDPOINT']}}},
+        credentialProviderConfigurations=[{
+            'credentialProviderType': 'GATEWAY_IAM_ROLE',
+            'credentialProvider': {'iamCredentialProvider': {'service': 'bedrock-agentcore'}},
+        }],
+    )
 for _ in range(60):
     g = client.get_gateway_target(gatewayIdentifier=os.environ['GATEWAY_ID'], targetId=target_id)
     status = g.get('status')
@@ -2211,32 +2246,21 @@ for _ in range(60):
         sys.stderr.write(f'target failed: status={status} reasons={g.get("statusReasons")}\n')
         sys.exit(1)
     time.sleep(5)
-  client.synchronize_gateway_targets(
-    gatewayIdentifier=os.environ['GATEWAY_ID'],
-    targetIdList=[target_id],
-  )
-  for _ in range(60):
-    g = client.get_gateway_target(gatewayIdentifier=os.environ['GATEWAY_ID'], targetId=target_id)
-    status = g.get('status')
-    if status == 'READY':
-      break
-    if status in ('FAILED', 'DELETING'):
-      sys.stderr.write(f'target failed: status={status} reasons={g.get("statusReasons")}\n')
-      sys.exit(1)
-    time.sleep(5)
 print(target_id)
 PYEOF
 """
 
 _GATEWAY_TARGET_DELETE_SCRIPT = r"""python3 <<'PYEOF'
-import boto3, os
+import boto3, hashlib, os
 client = boto3.client('bedrock-agentcore-control', region_name=os.environ['REGION'])
+source_stamp = hashlib.sha1(os.environ['SOURCE_VERSION'].encode()).hexdigest()[:10]
+expected_description = f'Target for AgentCore-hosted MCP server [{source_stamp}]'
 try:
     targets = client.list_gateway_targets(gatewayIdentifier=os.environ['GATEWAY_ID']).get('items', [])
 except client.exceptions.ResourceNotFoundException:
     targets = []
 for t in targets:
-    if t['name'] == os.environ['TARGET_NAME']:
+    if t['name'] == os.environ['TARGET_NAME'] and t.get('description') == expected_description:
         client.delete_gateway_target(gatewayIdentifier=os.environ['GATEWAY_ID'], targetId=t['targetId'])
         break
 PYEOF
@@ -2244,20 +2268,18 @@ PYEOF
 
 mcp_gateway_target = command.local.Command(
     "mcp_gateway_target",
-  create=_GATEWAY_TARGET_UPSERT_SCRIPT,
+    create=_GATEWAY_TARGET_UPSERT_SCRIPT,
+    update=_GATEWAY_TARGET_UPSERT_SCRIPT,
     delete=_GATEWAY_TARGET_DELETE_SCRIPT,
-  update=_GATEWAY_TARGET_UPSERT_SCRIPT,
     environment={
         "REGION": current_region.apply(lambda r: r.region),
         "GATEWAY_ID": mcp_gateway.gateway_identifier,
         "TARGET_NAME": mcp_target_name,
         "ENDPOINT": runtime_invocation_endpoint,
+        "SOURCE_VERSION": agent_source_object.version_id.apply(
+            lambda v: v if v else "initial"
+        ),
     },
-    triggers=[
-        mcp_gateway.gateway_identifier,
-        runtime_invocation_endpoint,
-      image_tag,
-    ],
 )
 
 mcp_gateway_target_id = mcp_gateway_target.stdout.apply(lambda s: s.strip())
@@ -2607,6 +2629,7 @@ const mcpGateway = new awsNative.bedrockagentcore.Gateway(
       customJwtAuthorizer: {
         allowedClients: [mcpClient.id],
         discoveryUrl: cognitoDiscoveryUrlInput,
+        allowedScopes: ["aws.cognito.signin.user.admin"],
       },
     },
     policyEngineConfiguration: {
@@ -2639,6 +2662,7 @@ mcp_gateway = aws_native.bedrockagentcore.Gateway(
     authorizer_configuration={
         "custom_jwt_authorizer": {
             "allowed_clients": [mcp_client.id],
+            "allowed_scopes": ["aws.cognito.signin.user.admin"],
             "discovery_url": cognito_discovery_url,
         },
     },
